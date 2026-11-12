@@ -95,6 +95,7 @@ export default function App() {
   // Cache daftar peserta multiplayer agar nama/skor user yang logout tetap bertahan di layar peserta lain
   const [cachedMultiplayerRoster, setCachedMultiplayerRoster] = useState<MultiPlayerItem[]>([]);
   const hasLoggedMpFinishRef = useRef(false);
+  const hasLoggedSoloFinishRef = useRef(false);
 
   // Navigation
   const [currentScreen, setCurrentScreen] = useState<ScreenState>('REGISTRATION');
@@ -271,6 +272,10 @@ export default function App() {
         setIsAnswerLocked(false);
         isAnswerLockedRef.current = false;
       } else {
+        // Cegah pemanggilan ganda saat selesai Solo
+        if (hasLoggedSoloFinishRef.current) return;
+        hasLoggedSoloFinishRef.current = true;
+
         const topicFullName = selectedTopic
           ? `${selectedTopic.nama}: ${selectedTopic.judul}`
           : '-';
@@ -476,6 +481,7 @@ export default function App() {
     playClickSound();
     if (!validateForm()) return;
     setCachedMultiplayerRoster([]);
+    hasLoggedMpFinishRef.current = false;
     mp.createRoom(name.trim(), institution.trim(), topicId);
   };
 
@@ -488,12 +494,14 @@ export default function App() {
       return;
     }
     setCachedMultiplayerRoster([]);
+    hasLoggedMpFinishRef.current = false;
     mp.joinRoom(joinPinInput.trim(), name.trim(), institution.trim());
   };
 
   const handleSelectSoloTopic = (topic: TopicPackage) => {
     playClickSound();
     setSelectedTopic(topic);
+    hasLoggedSoloFinishRef.current = false;
 
     const prepared = prepareTeacherQuiz(topic.soal);
     setSoloQuestions(prepared);
@@ -540,6 +548,8 @@ export default function App() {
   const handleResetToHome = () => {
     playClickSound();
     isAnswerLockedRef.current = false;
+    hasLoggedSoloFinishRef.current = false;
+    hasLoggedMpFinishRef.current = false;
     if (playMode === 'MULTIPLAYER') {
       mp.leaveRoom();
       setCachedMultiplayerRoster([]);
@@ -584,16 +594,16 @@ export default function App() {
 
   return (
     <div
-      className={`relative w-full h-dvh overflow-hidden bg-gradient-to-b ${currentTheme.bgGradient} flex flex-col font-display ${
+      className={`relative w-full h-dvh max-h-dvh overflow-hidden bg-gradient-to-b ${currentTheme.bgGradient} flex flex-col font-display ${
         currentTheme.isDark ? 'text-white' : 'text-slate-900'
-      } select-none transition-colors duration-300`}
+      } transition-colors duration-300`}
     >
       {/* Dynamic Animated Backdrop based on Active Theme */}
       <ThemeBackdrop themeId={themeId} />
 
       {/* Top Bar */}
       <header
-        className={`relative z-20 w-full px-3 sm:px-5 py-2 sm:py-2.5 flex items-center justify-between gap-2 border-b ${currentTheme.headerBorder} ${currentTheme.headerBg} shrink-0 shadow-xs transition-colors duration-300`}
+        className={`relative z-20 w-full px-3 sm:px-5 py-2 sm:py-2.5 flex items-center justify-between gap-2 border-b ${currentTheme.headerBorder} ${currentTheme.headerBg} shrink-0 shadow-xs transition-colors duration-300 select-none`}
       >
         {/* Left: Brand title ONLY */}
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
@@ -699,9 +709,9 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Viewport Container (Scrollable dengan m-auto pada anak agar tidak terpotong di HP/Laptop) */}
-      <main className="relative z-10 flex-1 w-full overflow-y-auto overscroll-contain px-3 sm:px-5 py-3 sm:py-4 flex flex-col">
-        <div className="w-full max-w-4xl mx-auto my-auto flex flex-col items-center">
+      {/* Main Viewport Container (Responsif & bisa di-scroll mulus di HP, Tablet, maupun Laptop) */}
+      <main className="relative z-10 flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y px-3 sm:px-6 md:px-8 py-4 sm:py-6">
+        <div className="min-h-full w-full max-w-4xl mx-auto flex flex-col items-center justify-center">
           {/* ============================================================ */}
           {/* LAYAR 1: REGISTRASI & MODE SWITCHER                          */}
           {/* ============================================================ */}
@@ -715,7 +725,7 @@ export default function App() {
                   currentTheme.isDark
                     ? 'bg-slate-800/80 border-slate-700'
                     : 'bg-amber-100/70 border-amber-200'
-                } rounded-xl mb-4 border`}
+                } rounded-xl mb-4 border select-none`}
               >
                 <button
                   type="button"
@@ -859,14 +869,14 @@ export default function App() {
                   <button
                     type="button"
                     onClick={handleStartSolo}
-                    className={`btn-kahoot w-full h-11 mt-2 ${currentTheme.primaryButtonBg} font-extrabold rounded-xl text-xs border-b-4 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer`}
+                    className={`btn-kahoot w-full h-11 mt-2 ${currentTheme.primaryButtonBg} font-extrabold rounded-xl text-xs border-b-4 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none`}
                   >
                     <span>PILIH TOPIK</span>
                     <span>→</span>
                   </button>
                 ) : (
                   <div className="pt-2 space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-2 select-none">
                       <button
                         type="button"
                         onClick={() => setMultiplayerAction('CREATE')}
@@ -899,7 +909,7 @@ export default function App() {
                             setCurrentScreen('CHOOSE_TOPIC');
                           }
                         }}
-                        className="btn-kahoot w-full h-11 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-extrabold rounded-xl text-xs border-b-4 border-emerald-800 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                        className="btn-kahoot w-full h-11 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-extrabold rounded-xl text-xs border-b-4 border-emerald-800 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none"
                       >
                         <span>PILIH TOPIK & BUAT PIN ROOM</span>
                         <span>→</span>
@@ -918,7 +928,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={handleJoinRoom}
-                          className="btn-kahoot w-full sm:flex-1 h-11 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs border-b-4 border-amber-700 shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer"
+                          className="btn-kahoot w-full sm:flex-1 h-11 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs border-b-4 border-amber-700 shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer select-none"
                         >
                           <span>GABUNG ROOM</span>
                           <span>→</span>
@@ -932,10 +942,10 @@ export default function App() {
           )}
 
           {/* ============================================================ */}
-          {/* LAYAR 2: PILIH TOPIK (GRID COMPACT 2 KOLOM DI HP & DESKTOP)   */}
+          {/* LAYAR 2: PILIH TOPIK (GRID RESPONSIF HP, TABLET, DESKTOP)    */}
           {/* ============================================================ */}
           {currentScreen === 'CHOOSE_TOPIC' && (
-            <div className="w-full max-w-2xl mx-auto flex flex-col">
+            <div className="w-full max-w-3xl mx-auto flex flex-col py-1">
               <div
                 className={`flex items-center justify-between gap-2 pb-2.5 border-b ${currentTheme.headerBorder} shrink-0`}
               >
@@ -948,7 +958,7 @@ export default function App() {
                     currentTheme.isDark
                       ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-b-2 border-slate-600'
                       : 'bg-white/90 hover:bg-white text-slate-700 border-b-2 border-slate-300'
-                  } rounded-lg text-xs font-bold shadow-xs cursor-pointer shrink-0`}
+                  } rounded-lg text-xs font-bold shadow-xs cursor-pointer shrink-0 select-none`}
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>Kembali</span>
@@ -970,8 +980,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Grid 2 Kolom Rapi & Kompak di HP maupun Desktop */}
-              <div className="grid grid-cols-2 gap-2.5 sm:gap-3.5 my-3">
+              {/* Grid 1 Kolom di HP kecil, 2 Kolom di Tablet & Desktop */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3.5 my-3">
                 {Object.values(BANK_SOAL).map((topic) => (
                   <button
                     key={topic.id}
@@ -986,7 +996,7 @@ export default function App() {
                       currentTheme.isDark
                         ? 'bg-slate-900/90 hover:bg-slate-800 text-white border-slate-700 hover:border-amber-400 border-b-slate-800 hover:border-b-amber-500'
                         : 'bg-white/95 hover:bg-amber-50/90 text-slate-900 border-amber-200/90 hover:border-amber-400 border-b-amber-300 hover:border-b-amber-500'
-                    } rounded-xl sm:rounded-2xl border-2 border-b-4 shadow-sm text-left flex flex-col justify-between min-h-[5.5rem] sm:min-h-[7rem] cursor-pointer transition-all`}
+                    } rounded-xl sm:rounded-2xl border-2 border-b-4 shadow-sm text-left flex flex-col justify-between min-h-[5.5rem] sm:min-h-[6.75rem] cursor-pointer transition-all select-none`}
                   >
                     <div className="flex items-center justify-between w-full gap-1">
                       <span
@@ -1109,7 +1119,7 @@ export default function App() {
                   type="button"
                   onClick={mp.startRoomGame}
                   disabled={mp.players.length < 2}
-                  className="btn-kahoot w-full h-12 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-extrabold rounded-xl text-xs sm:text-sm border-b-4 border-emerald-800 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="btn-kahoot w-full h-12 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-extrabold rounded-xl text-xs sm:text-sm border-b-4 border-emerald-800 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none"
                 >
                   <Play className="w-4 h-4 fill-white shrink-0" />
                   <span>MULAI KUIS BERSAMA ({mp.players.length} Peserta)</span>
@@ -1124,7 +1134,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleResetToHome}
-                className="mt-3 text-xs font-semibold text-slate-400 hover:text-rose-600 flex items-center justify-center gap-1 mx-auto transition-colors cursor-pointer"
+                className="mt-3 text-xs font-semibold text-slate-400 hover:text-rose-600 flex items-center justify-center gap-1 mx-auto transition-colors cursor-pointer select-none"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 <span>Keluar dari Room</span>
@@ -1271,7 +1281,7 @@ export default function App() {
               </div>
 
               {/* Kahoot 4 Geometric Color Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0 pt-1 pb-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0 pt-1 pb-1 select-none">
                 {activeQuestion.options.map((option, idx) => {
                   const isSelected = selectedOption === option;
                   const isCorrect = option === activeQuestion.correctAnswerText;
@@ -1398,7 +1408,7 @@ export default function App() {
 
               <button
                 onClick={handleResetToHome}
-                className={`btn-kahoot w-full h-12 ${currentTheme.primaryButtonBg} font-extrabold rounded-xl text-sm border-b-4 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer`}
+                className={`btn-kahoot w-full h-12 ${currentTheme.primaryButtonBg} font-extrabold rounded-xl text-sm border-b-4 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none`}
               >
                 <span>SELESAI</span>
               </button>
@@ -1548,7 +1558,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleResetToHome}
-                className="btn-kahoot w-full h-11 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs border-b-4 border-slate-950 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="btn-kahoot w-full h-11 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs border-b-4 border-slate-950 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none"
               >
                 <span>KEMBALI KE MENU UTAMA</span>
               </button>
@@ -1559,7 +1569,7 @@ export default function App() {
 
       {/* Global Footer */}
       <footer
-        className={`relative z-20 w-full px-4 py-2 border-t ${currentTheme.footerBorder} ${currentTheme.footerBg} text-center shrink-0 transition-colors duration-300`}
+        className={`relative z-20 w-full px-4 py-2 border-t ${currentTheme.footerBorder} ${currentTheme.footerBg} text-center shrink-0 transition-colors duration-300 select-none`}
       >
         <p className={`text-xs font-semibold ${currentTheme.footerText}`}>
           Quiz Inagata · Tema {currentTheme.name}

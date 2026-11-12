@@ -1,11 +1,13 @@
 /**
- * Manajemen Penyimpanan Data Peserta Kuis Guru Expo UIN
- * - LocalStorage browser
- * - Background Sync ke Google Apps Script / Google Sheets
- * - Export data ke CSV (Excel-compatible dengan UTF-8 BOM)
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
  */
 
-import { GOOGLE_SCRIPT_URL } from '../data/bankSoal';
+/**
+ * Manajemen Penyimpanan Data Peserta Kuis Guru Expo UIN
+ * - LocalStorage browser
+ * - Export data ke CSV (Excel-compatible dengan UTF-8 BOM)
+ */
 
 export interface TeacherQuizRecord {
   id: string;
@@ -41,7 +43,8 @@ export function getAllQuizRecords(): TeacherQuizRecord[] {
 }
 
 /**
- * Menyimpan data peserta baru (Dual Backup)
+ * Menyimpan data peserta baru ke LocalStorage browser
+ * (Sinkronisasi ke Google Sheets ditangani secara terpusat di App.tsx untuk menghindari duplikasi)
  */
 export function saveTeacherQuizRecord(
   data: Omit<TeacherQuizRecord, 'id' | 'timestamp' | 'formattedDate'>
@@ -66,34 +69,6 @@ export function saveTeacherQuizRecord(
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedList));
   } catch (err) {
     console.error('Gagal menyimpan ke localStorage:', err);
-  }
-
-  // 2. Background Sync ke Google Sheets jika GOOGLE_SCRIPT_URL diisi
-  if (GOOGLE_SCRIPT_URL && GOOGLE_SCRIPT_URL.trim() !== '') {
-    try {
-      fetch(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          waktu: newRecord.formattedDate,
-          nama: newRecord.name,
-          instansi: newRecord.institution,
-          noHp: newRecord.phone,
-          topik: newRecord.topicName,
-          skor: newRecord.score,
-          benar: newRecord.correctCount,
-          waktuHabis: newRecord.timedOutCount,
-          total: newRecord.totalQuestions,
-        }),
-      }).catch((err) => {
-        console.warn('Background sync ke Google Sheets gagal (tersimpan aman di localStorage):', err);
-      });
-    } catch (err) {
-      console.warn('Error saat inisiasi background fetch:', err);
-    }
   }
 
   return newRecord;
