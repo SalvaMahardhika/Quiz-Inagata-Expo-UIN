@@ -113,10 +113,6 @@ export default function App() {
   const [timeRemainingMs, setTimeRemainingMs] = useState(QUESTION_DURATION_SEC * 1000);
   const questionStartTimeRef = useRef<number>(Date.now());
 
-  // Auto-Reset Timer (15 Detik di Layar Hasil Solo)
-  const [resetCountdown, setResetCountdown] = useState(15);
-  const resetTimerRef = useRef<NodeJS.Timeout | null>(null);
-
   // Modals & Kontrol
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
@@ -283,20 +279,9 @@ export default function App() {
     };
   }, [isPlaying, currentQIndex, activeQuestion?.kode]);
 
-  // Auto-reset pada layar hasil Solo
+  // Confetti & fanfare pada layar hasil Solo (tanpa auto-reset timer)
   useEffect(() => {
     if (playMode === 'SOLO' && currentScreen === 'RESULT') {
-      setResetCountdown(15);
-      resetTimerRef.current = setInterval(() => {
-        setResetCountdown((prev) => {
-          if (prev <= 1) {
-            handleResetToHome();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
       try {
         confetti({
           particleCount: 80,
@@ -308,18 +293,7 @@ export default function App() {
         // ignore
       }
       playFanfareSound();
-    } else {
-      if (resetTimerRef.current) {
-        clearInterval(resetTimerRef.current);
-        resetTimerRef.current = null;
-      }
     }
-
-    return () => {
-      if (resetTimerRef.current) {
-        clearInterval(resetTimerRef.current);
-      }
-    };
   }, [currentScreen, playMode]);
 
   // Confetti saat multiplayer game over
@@ -440,10 +414,6 @@ export default function App() {
   const handleResetToHome = () => {
     playClickSound();
     isAnswerLockedRef.current = false;
-    if (resetTimerRef.current) {
-      clearInterval(resetTimerRef.current);
-      resetTimerRef.current = null;
-    }
     if (playMode === 'MULTIPLAYER') {
       mp.leaveRoom();
       setCachedMultiplayerRoster([]);
@@ -778,10 +748,10 @@ export default function App() {
         )}
 
         {/* ============================================================ */}
-        {/* LAYAR 2: PILIH TOPIK                                         */}
+        {/* LAYAR 2: PILIH TOPIK (LAYOUT GRID 2 x 2 RAPIH)               */}
         {/* ============================================================ */}
         {currentScreen === 'CHOOSE_TOPIC' && (
-          <div className="w-full lg:h-full flex flex-col justify-between py-1 sm:py-2 my-auto">
+          <div className="w-full max-w-2xl mx-auto lg:h-full flex flex-col justify-between py-1 sm:py-2 my-auto">
             <div className={`flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b ${currentTheme.headerBorder} shrink-0`}>
               <button
                 onClick={() => {
@@ -804,7 +774,8 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 sm:gap-3 my-3 lg:my-auto py-1">
+            {/* Grid 2-2 yang rapi untuk semua topik */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 my-4 lg:my-auto py-1">
               {Object.values(BANK_SOAL).map((topic) => (
                 <button
                   key={topic.id}
@@ -815,22 +786,25 @@ export default function App() {
                       handleSelectSoloTopic(topic);
                     }
                   }}
-                  className={`btn-kahoot group p-3 sm:p-3.5 ${
+                  className={`btn-kahoot group p-4 sm:p-5 ${
                     currentTheme.isDark
                       ? 'bg-slate-900/90 hover:bg-slate-800 text-white border-slate-700 hover:border-amber-400 border-b-slate-800 hover:border-b-amber-500'
                       : 'bg-white/95 hover:bg-amber-50/90 text-slate-900 border-amber-200/90 hover:border-amber-400 border-b-amber-300 hover:border-b-amber-500'
-                  } rounded-2xl border-2 border-b-4 shadow-sm text-left flex flex-col justify-between min-h-[6rem] sm:h-28 cursor-pointer transition-all`}
+                  } rounded-2xl border-2 border-b-4 shadow-sm text-left flex flex-col justify-between min-h-[7rem] sm:min-h-[7.75rem] cursor-pointer transition-all`}
                 >
                   <div className="flex items-center justify-between w-full">
-                    <span className={`w-6 h-6 rounded-md ${currentTheme.badgeBg} ${currentTheme.badgeText} font-mono text-[11px] font-bold flex items-center justify-center`}>
+                    <span className={`w-7 h-7 rounded-lg ${currentTheme.badgeBg} ${currentTheme.badgeText} font-mono text-xs font-bold flex items-center justify-center`}>
                       {String(topic.id).padStart(2, '0')}
                     </span>
+                    <span className={`text-[11px] font-bold uppercase tracking-wider ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                      {topic.nama}
+                    </span>
                   </div>
-                  <div className="mt-2">
-                    <h3 className={`text-xs sm:text-sm font-bold ${currentTheme.isDark ? 'text-white' : 'text-slate-900'} leading-snug line-clamp-2`}>
+                  <div className="mt-2.5">
+                    <h3 className={`text-sm sm:text-base font-bold ${currentTheme.isDark ? 'text-white' : 'text-slate-900'} leading-snug line-clamp-2`}>
                       {topic.judul}
                     </h3>
-                    <p className={`text-[10px] ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-400'} line-clamp-1 mt-0.5`}>
+                    <p className={`text-xs ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'} line-clamp-2 mt-1`}>
                       {topic.deskripsi}
                     </p>
                   </div>
@@ -1130,7 +1104,7 @@ export default function App() {
         )}
 
         {/* ============================================================ */}
-        {/* LAYAR 4A: HASIL KUIS SOLO                                    */}
+        {/* LAYAR 4A: HASIL KUIS SOLO (TANPA TIMER OTOMATIS KEMBALI)     */}
         {/* ============================================================ */}
         {playMode === 'SOLO' && currentScreen === 'RESULT' && (
           <div className={`w-full max-w-sm ${currentTheme.cardBg} rounded-2xl p-6 sm:p-7 border-2 ${currentTheme.cardBorder} text-center shadow-xl animate-pop my-auto`}>
@@ -1157,15 +1131,11 @@ export default function App() {
             >
               <span>SELESAI</span>
             </button>
-
-            <p className={`text-[11px] font-semibold ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-400'} mt-3 tabular-nums`}>
-              Kembali ke awal dalam {resetCountdown} detik
-            </p>
           </div>
         )}
 
         {/* ============================================================ */}
-        {/* LAYAR 4B: PODIUM KEMENANGAN MULTIPLAYER (TEMPORARY ROOM)      */}
+        {/* LAYAR 4B: PODIUM KEMENANGAN MULTIPLAYER (TEMPORARY ROOM)     */}
         {/* ============================================================ */}
         {playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED' && (
           <div className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-5 sm:p-6 border-2 ${currentTheme.cardBorder} shadow-xl my-auto animate-pop text-center`}>
