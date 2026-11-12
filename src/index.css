@@ -1,0 +1,275 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+}
+
+.font-display {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
+/* Kahoot / Quizizz 3D Push Button */
+.btn-kahoot {
+  transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.1s ease;
+  position: relative;
+  touch-action: manipulation;
+}
+
+.btn-kahoot:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+/* Wrong answer shake */
+@keyframes kahootShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+
+.animate-shake {
+  animation: kahootShake 0.4s ease-in-out;
+}
+
+/* Correct answer pop */
+@keyframes kahootPop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.animate-pop {
+  animation: kahootPop 0.35s ease-out;
+}
+
+/* Desert oasis water shimmer */
+@keyframes oasisShimmer {
+  0%, 100% {
+    opacity: 0.75;
+    transform: scaleX(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scaleX(1.03);
+  }
+}
+
+.animate-oasis-shimmer {
+  animation: oasisShimmer 4s ease-in-out infinite;
+}
+
+/* Gentle desert cloud float */
+@keyframes floatDrift {
+  0%, 100% {
+    transform: translateX(0px) translateY(0px);
+  }
+  50% {
+    transform: translateX(12px) translateY(-4px);
+  }
+}
+
+.animate-drift {
+  animation: floatDrift 7s ease-in-out infinite;
+}
+
+/* Camel Walk Bobbing */
+@keyframes camelBob {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-3px) rotate(0.8deg);
+  }
+  75% {
+    transform: translateY(-1.5px) rotate(-0.5deg);
+  }
+}
+
+.animate-camel-bob {
+  animation: camelBob 2.4s ease-in-out infinite;
+}
+
+/* Resting Camel Breathing */
+@keyframes camelBreathe {
+  0%, 100% {
+    transform: scale(1) translateY(0px);
+  }
+  50% {
+    transform: scale(1.015, 0.99) translateY(-1px);
+  }
+}
+
+.animate-camel-breathe {
+  animation: camelBreathe 3.5s ease-in-out infinite;
+}
+
+/* Caravan Trek across dunes */
+@keyframes caravanTrek {
+  0% {
+    transform: translateX(110%);
+  }
+  100% {
+    transform: translateX(-120%);
+  }
+}
+
+.animate-caravan {
+  animation: caravanTrek 48s linear infinite;
+}
+
+/* Atlantis Rising Bubbles */
+@keyframes bubbleFloat {
+  0% {
+    transform: translateY(120vh) translateX(0) scale(0.6);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.7;
+  }
+  50% {
+    transform: translateY(60vh) translateX(15px) scale(0.9);
+  }
+  80% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: translateY(-20vh) translateX(-10px) scale(1.1);
+    opacity: 0;
+  }
+}
+
+.animate-bubble-1 {
+  animation: bubbleFloat 9s ease-in infinite;
+}
+.animate-bubble-2 {
+  animation: bubbleFloat 13s ease-in infinite 2.5s;
+}
+.animate-bubble-3 {
+  animation: bubbleFloat 11s ease-in infinite 5s;
+}
+
+/* Tundra Aurora Flow */
+@keyframes auroraGlow {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scaleX(1) scaleY(1) translateY(0);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scaleX(1.1) scaleY(1.15) translateY(-8px);
+  }
+}
+
+.animate-aurora {
+  animation: auroraGlow 7s ease-in-out infinite;
+}
+
+/* Tundra Snow Drift */
+@keyframes snowFall {
+  0% {
+    transform: translateY(-10vh) translateX(0);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.8;
+  }
+  85% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(110vh) translateX(25px);
+    opacity: 0;
+  }
+}
+
+.animate-snow-1 {
+  animation: snowFall 6s linear infinite;
+}
+.animate-snow-2 {
+  animation: snowFall 9s linear infinite 2s;
+}
+.animate-snow-3 {
+  animation: snowFall 7.5s linear infinite 4s;
+}
+
+/* Galaxy Star Twinkle & Shooting Star */
+@keyframes starTwinkle {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+.animate-star-twinkle {
+  animation: starTwinkle 3s ease-in-out infinite;
+}
+
+@keyframes shootingStar {
+  0% {
+    transform: translateX(0) translateY(0) scale(0);
+    opacity: 0;
+  }
+  2% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  8% {
+    transform: translateX(350px) translateY(200px) scale(1);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(350px) translateY(200px) scale(0);
+    opacity: 0;
+  }
+}
+
+.animate-shooting-star {
+  animation: shootingStar 12s linear infinite;
+}
+
+/* Jungle Firefly Pulse */
+@keyframes fireflyPulse {
+  0%, 100% {
+    opacity: 0.2;
+    transform: translate(0, 0) scale(0.8);
+  }
+  50% {
+    opacity: 0.95;
+    transform: translate(8px, -12px) scale(1.15);
+  }
+}
+
+.animate-firefly-1 {
+  animation: fireflyPulse 4s ease-in-out infinite;
+}
+.animate-firefly-2 {
+  animation: fireflyPulse 5.5s ease-in-out infinite 1.5s;
+}
+.animate-firefly-3 {
+  animation: fireflyPulse 3.5s ease-in-out infinite 3s;
+}
+
+/* Mountain Morning Mist Drift */
+@keyframes mountainMist {
+  0%, 100% {
+    transform: translateX(0) scaleY(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateX(30px) scaleY(1.08);
+    opacity: 0.7;
+  }
+}
+
+.animate-mountain-mist {
+  animation: mountainMist 14s ease-in-out infinite;
+}
