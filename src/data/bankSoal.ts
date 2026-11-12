@@ -14,7 +14,7 @@
 // Isi URL Web App Google Apps Script di sini jika ingin mengirim data peserta secara otomatis ke Google Sheets.
 // Contoh: "https://script.google.com/macros/s/AKfycbx.../exec"
 export const GOOGLE_SCRIPT_URL: string =
-  "https://script.google.com/macros/s/AKfycbxMJnW4haFoNoptcusRQ9-067EeRprFboWOrYv1VxETbtOxcaCHq6rrp7o_umPNu7hX_Q/exec";
+  "https://script.google.com/macros/s/AKfycbwuZZLFO8k7mHoXpjuKfaG7LbXOxfmxPhYIZg5qIJAgkZlEySfY6aHjbGrayx5aZVG9QQ/exec";
 
 // PIN ADMIN DEFAULT UNTUK EXPORT CSV DAN RESET DATA
 export const ADMIN_PIN: string = "1234";

@@ -94,6 +94,7 @@ export default function App() {
 
   // Cache daftar peserta multiplayer agar nama/skor user yang logout tetap bertahan di layar peserta lain
   const [cachedMultiplayerRoster, setCachedMultiplayerRoster] = useState<MultiPlayerItem[]>([]);
+  const hasLoggedMpFinishRef = useRef(false);
 
   // Navigation
   const [currentScreen, setCurrentScreen] = useState<ScreenState>('REGISTRATION');
@@ -139,17 +140,83 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
+  // ============================================================
+  // REALTIME LOGGING KE GOOGLE SPREADSHEET (NON-BLOCKING & KONSISTEN)
+  // ============================================================
+  const sendToSpreadsheet = useCallback(
+    (payloadData: Record<string, string | number>) => {
+      if (!GOOGLE_SCRIPT_URL || !GOOGLE_SCRIPT_URL.trim()) return;
+
+      try {
+        const cleanName = name.trim();
+        const cleanInstitution = institution.trim();
+        const cleanPhone = phone.trim();
+
+        const fullPayload = {
+          timestamp: new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' }),
+          name: cleanName,
+          nama: cleanName,
+          institution: cleanInstitution,
+          instansi: cleanInstitution,
+          phone: cleanPhone,
+          whatsapp: cleanPhone,
+          no_wa: cleanPhone,
+          origin: window.location.origin || 'https://quiz-inagata.ai.studio/',
+          ...payloadData,
+        };
+
+        // Menggunakan text/plain agar Google Apps Script doPost(e) dapat membaca e.postData.contents tanpa preflight OPTIONS error
+        fetch(GOOGLE_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          keepalive: true,
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+          },
+          body: JSON.stringify(fullPayload),
+        }).catch(() => {
+          // Abaikan error jaringan agar tidak mengganggu alur permainan
+        });
+      } catch {
+        // Abaikan error runtime agar tidak mengganggu alur permainan
+      }
+    },
+    [name, institution, phone]
+  );
+
+  const logParticipantLogin = useCallback(
+    (modeLabel: string, detailLabel: string, topicTitle = '-') => {
+      sendToSpreadsheet({
+        action: 'LOGIN',
+        status: 'Mulai',
+        mode: modeLabel,
+        topic: topicTitle,
+        topik: topicTitle,
+        detail: detailLabel,
+        score: 0,
+        skor: 0,
+        correct: 0,
+        benar: 0,
+        totalQuestions: 10,
+        total_soal: 10,
+      });
+    },
+    [sendToSpreadsheet]
+  );
+
   // Sinkronisasi roster multiplayer agar user yang logout saat PLAYING/FINISHED tidak hilang dari papan peringkat sementara
   useEffect(() => {
     if (playMode !== 'MULTIPLAYER') return;
 
     if (mp.gameStatus === 'IDLE') {
       setCachedMultiplayerRoster([]);
+      hasLoggedMpFinishRef.current = false;
       return;
     }
 
     if (mp.gameStatus === 'LOBBY') {
       setCachedMultiplayerRoster(mp.players);
+      hasLoggedMpFinishRef.current = false;
       return;
     }
 
@@ -161,9 +228,7 @@ export default function App() {
     if (incomingList.length > 0) {
       setCachedMultiplayerRoster((prev) => {
         const mergedMap = new Map<string, MultiPlayerItem>();
-        // Pertahankan data pemain sebelumnya
         prev.forEach((p) => mergedMap.set(p.id, p));
-        // Perbarui dengan skor/data terbaru dari server
         incomingList.forEach((p) => mergedMap.set(p.id, p));
         return Array.from(mergedMap.values()).sort((a, b) => b.score - a.score);
       });
@@ -203,23 +268,54 @@ export default function App() {
         setIsAnswerLocked(false);
         isAnswerLockedRef.current = false;
       } else {
+        const topicFullName = selectedTopic
+          ? `${selectedTopic.nama}: ${selectedTopic.judul}`
+          : '-';
+
         if (selectedTopic) {
           saveTeacherQuizRecord({
             name: name.trim(),
             institution: institution.trim(),
             phone: phone.trim(),
             topicId: selectedTopic.id,
-            topicName: `${selectedTopic.nama}: ${selectedTopic.judul}`,
+            topicName: topicFullName,
             score: latestScore,
             totalQuestions: soloQuestions.length,
             correctCount: latestCorrect,
             timedOutCount: soloQuestions.length - latestCorrect,
           });
         }
+
+        // Kirim hasil akhir Solo ke Spreadsheet
+        sendToSpreadsheet({
+          action: 'RESULT',
+          status: 'Selesai',
+          mode: 'Mode Solo',
+          topic: topicFullName,
+          topik: topicFullName,
+          detail: `Selesai Solo (${latestCorrect}/${soloQuestions.length} benar)`,
+          score: latestScore,
+          skor: latestScore,
+          correct: latestCorrect,
+          benar: latestCorrect,
+          totalQuestions: soloQuestions.length,
+          total_soal: soloQuestions.length,
+        });
+
         setCurrentScreen('RESULT');
       }
     },
-    [soloQuestionIndex, soloQuestions.length, selectedTopic, name, institution, phone, score, correctAnswersCount]
+    [
+      soloQuestionIndex,
+      soloQuestions.length,
+      selectedTopic,
+      name,
+      institution,
+      phone,
+      score,
+      correctAnswersCount,
+      sendToSpreadsheet,
+    ]
   );
 
   // Stable timeout ref for per-participant countdown
@@ -304,9 +400,32 @@ export default function App() {
     }
   }, [currentScreen, playMode]);
 
-  // Confetti saat multiplayer game over
+  // Confetti & Spreadsheet logging saat multiplayer game over
   useEffect(() => {
     if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED') {
+      if (!hasLoggedMpFinishRef.current) {
+        hasLoggedMpFinishRef.current = true;
+        const myRosterEntry =
+          cachedMultiplayerRoster.find((p) => p.name === name.trim()) ||
+          mp.players.find((p) => p.name === name.trim());
+        const finalMpScore = myRosterEntry ? myRosterEntry.score : score;
+
+        sendToSpreadsheet({
+          action: 'RESULT',
+          status: 'Selesai',
+          mode: mp.isHost ? 'Bermain Bersama (Host)' : 'Bermain Bersama (Peserta)',
+          topic: mp.topicTitle || '-',
+          topik: mp.topicTitle || '-',
+          detail: `Selesai Room PIN ${mp.roomCode || '-'}`,
+          score: finalMpScore,
+          skor: finalMpScore,
+          correct: correctAnswersCount,
+          benar: correctAnswersCount,
+          totalQuestions: mp.questions.length || 10,
+          total_soal: mp.questions.length || 10,
+        });
+      }
+
       try {
         confetti({
           particleCount: 100,
@@ -319,42 +438,20 @@ export default function App() {
       }
       playFanfareSound();
     }
-  }, [playMode, mp.gameStatus]);
-
-  // ============================================================
-  // REALTIME LOGGING KE GOOGLE SPREADSHEET (NON-BLOCKING)
-  // ============================================================
-  const logParticipantLogin = useCallback(
-    (modeLabel: string, detailLabel: string) => {
-      if (!GOOGLE_SCRIPT_URL || !GOOGLE_SCRIPT_URL.trim()) return;
-
-      try {
-        const payload = {
-          name: name.trim(),
-          institution: institution.trim(),
-          phone: phone.trim(),
-          mode: modeLabel,
-          detail: detailLabel,
-          origin: window.location.origin || 'https://quiz-inagata.ai.studio/',
-        };
-
-        fetch(GOOGLE_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          keepalive: true,
-          headers: {
-            'Content-Type': 'text/plain;charset=utf-8',
-          },
-          body: JSON.stringify(payload),
-        }).catch(() => {
-          // Abaikan error jaringan agar tidak mengganggu alur permainan
-        });
-      } catch {
-        // Abaikan error runtime agar tidak mengganggu alur permainan
-      }
-    },
-    [name, institution, phone]
-  );
+  }, [
+    playMode,
+    mp.gameStatus,
+    mp.isHost,
+    mp.topicTitle,
+    mp.roomCode,
+    mp.players,
+    mp.questions.length,
+    cachedMultiplayerRoster,
+    name,
+    score,
+    correctAnswersCount,
+    sendToSpreadsheet,
+  ]);
 
   // ============================================================
   // REGISTRATION & GAMEPLAY HANDLERS
@@ -388,9 +485,11 @@ export default function App() {
     playClickSound();
     if (!validateForm()) return;
     const topic = BANK_SOAL[topicId];
+    const topicLabel = topic ? `${topic.nama}: ${topic.judul}` : `Topik ${topicId}`;
     logParticipantLogin(
       'Bermain Bersama (Host)',
-      topic ? `Buat Room - ${topic.nama}: ${topic.judul}` : `Buat Room Topik ${topicId}`
+      `Buat Room - ${topicLabel}`,
+      topicLabel
     );
     setCachedMultiplayerRoster([]);
     mp.createRoom(name.trim(), institution.trim(), topicId);
@@ -404,7 +503,11 @@ export default function App() {
       setFormError('Masukkan 4 digit PIN Room.');
       return;
     }
-    logParticipantLogin('Bermain Bersama (Peserta)', `Gabung Room PIN ${joinPinInput.trim()}`);
+    logParticipantLogin(
+      'Bermain Bersama (Peserta)',
+      `Gabung Room PIN ${joinPinInput.trim()}`,
+      `Room PIN ${joinPinInput.trim()}`
+    );
     setCachedMultiplayerRoster([]);
     mp.joinRoom(joinPinInput.trim(), name.trim(), institution.trim());
   };
@@ -445,7 +548,10 @@ export default function App() {
 
     if (playMode === 'SOLO') {
       setTimeout(() => {
-        moveToNextSoloQuestion(isCorrect ? score + 10 : score, isCorrect ? correctAnswersCount + 1 : correctAnswersCount);
+        moveToNextSoloQuestion(
+          isCorrect ? score + 10 : score,
+          isCorrect ? correctAnswersCount + 1 : correctAnswersCount
+        );
       }, 1000);
     } else {
       mp.submitAnswer(currentQIndex, optionText, timeTaken);
@@ -481,7 +587,10 @@ export default function App() {
   };
 
   const remainingSeconds = Math.ceil(timeRemainingMs / 1000);
-  const timerPercentage = Math.max(0, Math.min(100, (timeRemainingMs / (QUESTION_DURATION_SEC * 1000)) * 100));
+  const timerPercentage = Math.max(
+    0,
+    Math.min(100, (timeRemainingMs / (QUESTION_DURATION_SEC * 1000)) * 100)
+  );
 
   // Daftar peserta temporary multiplayer yang tetap menyimpan user meskipun sudah logout
   const liveMultiplayerLeaderboard =
@@ -495,21 +604,33 @@ export default function App() {
       : mp.players;
 
   return (
-    <div className={`relative w-full min-h-dvh lg:h-dvh overflow-x-hidden lg:overflow-hidden bg-gradient-to-b ${currentTheme.bgGradient} flex flex-col justify-between font-display ${currentTheme.isDark ? 'text-white' : 'text-slate-900'} select-none transition-colors duration-300`}>
+    <div
+      className={`relative w-full min-h-dvh lg:h-dvh overflow-x-hidden overflow-y-auto bg-gradient-to-b ${currentTheme.bgGradient} flex flex-col justify-between font-display ${
+        currentTheme.isDark ? 'text-white' : 'text-slate-900'
+      } select-none transition-colors duration-300`}
+    >
       {/* Dynamic Animated Backdrop based on Active Theme */}
       <ThemeBackdrop themeId={themeId} />
 
       {/* Top Bar */}
-      <header className={`relative z-20 w-full px-3 sm:px-5 py-2.5 sm:py-3 flex items-center justify-between gap-2 border-b ${currentTheme.headerBorder} ${currentTheme.headerBg} shrink-0 shadow-xs transition-colors duration-300`}>
-        {/* Left: Brand title ONLY (tanpa placeholder logo & emoji) */}
-        <div className="flex items-center gap-2 min-w-0">
-          <span className={`text-base sm:text-lg font-extrabold tracking-tight truncate ${currentTheme.isDark ? 'text-white' : 'text-slate-900'}`}>
+      <header
+        className={`sticky top-0 z-20 w-full px-3 sm:px-5 py-2 sm:py-2.5 flex items-center justify-between gap-2 border-b ${currentTheme.headerBorder} ${currentTheme.headerBg} shrink-0 shadow-xs transition-colors duration-300`}
+      >
+        {/* Left: Brand title ONLY */}
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+          <span
+            className={`text-sm sm:text-lg font-extrabold tracking-tight truncate ${
+              currentTheme.isDark ? 'text-white' : 'text-slate-900'
+            }`}
+          >
             Quiz Inagata
           </span>
 
           {playMode === 'MULTIPLAYER' && mp.roomCode && (
-            <div className={`flex items-center gap-1.5 text-[11px] sm:text-xs font-bold ${currentTheme.badgeBg} ${currentTheme.badgeText} px-2 sm:px-2.5 py-0.5 sm:py-1 rounded-lg border ${currentTheme.badgeBorder} shrink-0`}>
-              <Users className="w-3.5 h-3.5" />
+            <div
+              className={`flex items-center gap-1 text-[11px] sm:text-xs font-bold ${currentTheme.badgeBg} ${currentTheme.badgeText} px-2 py-0.5 sm:py-1 rounded-lg border ${currentTheme.badgeBorder} shrink-0`}
+            >
+              <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               <span>PIN: {mp.roomCode}</span>
             </div>
           )}
@@ -517,7 +638,9 @@ export default function App() {
 
         {/* Zone 2: Progress indicator */}
         {isPlaying ? (
-          <div className={`px-2.5 sm:px-3 py-1 ${currentTheme.badgeBg} border ${currentTheme.badgeBorder} rounded-full text-xs font-bold ${currentTheme.badgeText} tabular-nums shadow-xs shrink-0`}>
+          <div
+            className={`px-2 sm:px-3 py-0.5 sm:py-1 ${currentTheme.badgeBg} border ${currentTheme.badgeBorder} rounded-full text-[11px] sm:text-xs font-bold ${currentTheme.badgeText} tabular-nums shadow-xs shrink-0`}
+          >
             {currentQIndex + 1} / {currentQuestions.length}
           </div>
         ) : (
@@ -525,7 +648,7 @@ export default function App() {
         )}
 
         {/* Zone 3: Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {/* Quick Theme Switcher Button */}
           <button
             onClick={() => {
@@ -539,7 +662,7 @@ export default function App() {
             }`}
             title="Ganti Tema"
           >
-            <Palette className="w-3.5 h-3.5 text-amber-500" />
+            <Palette className="w-3.5 h-3.5 text-amber-500 shrink-0" />
             <span className="hidden md:inline">Tema: {currentTheme.name}</span>
           </button>
 
@@ -552,10 +675,11 @@ export default function App() {
                     playClickSound();
                     setIsLeaderboardOpen(true);
                   }}
-                  className="btn-kahoot px-2.5 sm:px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-200 hover:bg-amber-300 border-b-2 border-amber-400 rounded-lg shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                  className="btn-kahoot px-2 sm:px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-200 hover:bg-amber-300 border-b-2 border-amber-400 rounded-lg shadow-xs transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer"
+                  title="Papan Skor"
                 >
-                  <Trophy className="w-3.5 h-3.5 text-amber-800" />
-                  <span className="hidden xs:inline sm:inline">Papan Skor</span>
+                  <Trophy className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+                  <span className="hidden sm:inline">Papan Skor</span>
                 </button>
               )}
               <button
@@ -563,7 +687,7 @@ export default function App() {
                   playClickSound();
                   setIsAdminModalOpen(true);
                 }}
-                className="btn-kahoot px-2.5 sm:px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border-b-2 border-slate-300 rounded-lg shadow-xs transition-all cursor-pointer"
+                className="btn-kahoot px-2 sm:px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border-b-2 border-slate-300 rounded-lg shadow-xs transition-all cursor-pointer"
               >
                 Admin
               </button>
@@ -575,7 +699,11 @@ export default function App() {
             className="p-1.5 text-slate-700 bg-white/80 hover:bg-white border border-slate-200 rounded-lg shadow-xs transition-colors cursor-pointer"
             aria-label={isMuted ? 'Nyalakan suara' : 'Bisukan suara'}
           >
-            {isMuted ? <VolumeX className="w-4 h-4 text-rose-600" /> : <Volume2 className="w-4 h-4 text-slate-700" />}
+            {isMuted ? (
+              <VolumeX className="w-4 h-4 text-rose-600" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-slate-700" />
+            )}
           </button>
 
           <button
@@ -583,34 +711,50 @@ export default function App() {
             className="hidden sm:inline-flex p-1.5 text-slate-700 bg-white/80 hover:bg-white border border-slate-200 rounded-lg shadow-xs transition-colors cursor-pointer"
             aria-label={isFullscreen ? 'Keluar layar penuh' : 'Layar penuh'}
           >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {isFullscreen ? (
+              <Minimize2 className="w-4 h-4" />
+            ) : (
+              <Maximize2 className="w-4 h-4" />
+            )}
           </button>
         </div>
       </header>
 
       {/* Main Viewport Container (Responsif untuk HP, Tablet, Laptop, dan Monitor) */}
-      <main className="relative z-10 flex-1 w-full max-w-4xl mx-auto px-3 sm:px-5 py-3 sm:py-4 flex flex-col justify-center items-center overflow-y-auto">
+      <main className="relative z-10 flex-1 w-full max-w-4xl mx-auto px-3 sm:px-5 py-3 sm:py-4 flex flex-col justify-center items-center min-h-0">
         {/* ============================================================ */}
         {/* LAYAR 1: REGISTRASI & MODE SWITCHER                          */}
         {/* ============================================================ */}
         {currentScreen === 'REGISTRATION' && mp.gameStatus === 'IDLE' && (
-          <div className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-5 sm:p-6 shadow-xl border-2 ${currentTheme.cardBorder} my-auto animate-pop`}>
+          <div
+            className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-4 sm:p-6 shadow-xl border-2 ${currentTheme.cardBorder} my-auto animate-pop`}
+          >
             {/* Mode Switcher Tabs */}
-            <div className={`grid grid-cols-2 p-1 ${currentTheme.isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-amber-100/70 border-amber-200'} rounded-xl mb-4 border`}>
+            <div
+              className={`grid grid-cols-2 p-1 ${
+                currentTheme.isDark
+                  ? 'bg-slate-800/80 border-slate-700'
+                  : 'bg-amber-100/70 border-amber-200'
+              } rounded-xl mb-4 border`}
+            >
               <button
                 type="button"
                 onClick={() => {
                   playClickSound();
                   setPlayMode('SOLO');
                 }}
-                className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`py-2 px-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   playMode === 'SOLO'
-                    ? currentTheme.isDark ? 'bg-slate-700 text-white shadow-xs' : 'bg-white text-slate-950 shadow-xs'
-                    : currentTheme.isDark ? 'text-slate-400 hover:text-white' : 'text-amber-900 hover:text-slate-950'
+                    ? currentTheme.isDark
+                      ? 'bg-slate-700 text-white shadow-xs'
+                      : 'bg-white text-slate-950 shadow-xs'
+                    : currentTheme.isDark
+                    ? 'text-slate-400 hover:text-white'
+                    : 'text-amber-900 hover:text-slate-950'
                 }`}
               >
-                <User className="w-3.5 h-3.5" />
-                <span>Mode Solo</span>
+                <User className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Mode Solo</span>
               </button>
 
               <button
@@ -619,22 +763,32 @@ export default function App() {
                   playClickSound();
                   setPlayMode('MULTIPLAYER');
                 }}
-                className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                className={`py-2 px-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   playMode === 'MULTIPLAYER'
                     ? 'bg-amber-500 text-slate-950 shadow-xs font-extrabold'
-                    : currentTheme.isDark ? 'text-slate-400 hover:text-white' : 'text-amber-900 hover:text-slate-950'
+                    : currentTheme.isDark
+                    ? 'text-slate-400 hover:text-white'
+                    : 'text-amber-900 hover:text-slate-950'
                 }`}
               >
-                <Users className="w-3.5 h-3.5" />
-                <span>Bermain Bersama</span>
+                <Users className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Bermain Bersama</span>
               </button>
             </div>
 
-            <div className="mb-4">
-              <h2 className={`text-base sm:text-lg font-bold tracking-tight ${currentTheme.isDark ? 'text-white' : 'text-slate-900'}`}>
+            <div className="mb-3.5 sm:mb-4">
+              <h2
+                className={`text-base sm:text-lg font-bold tracking-tight ${
+                  currentTheme.isDark ? 'text-white' : 'text-slate-900'
+                }`}
+              >
                 {playMode === 'SOLO' ? 'Registrasi Peserta' : 'Bermain Bersama'}
               </h2>
-              <p className={`text-xs mt-0.5 ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+              <p
+                className={`text-xs mt-0.5 ${
+                  currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+                }`}
+              >
                 {playMode === 'SOLO'
                   ? 'Lengkapi data untuk memulai kuis (masuk Papan Skor Global)'
                   : 'Bermain bersama di topik yang sama minimal 2 orang'}
@@ -649,7 +803,11 @@ export default function App() {
 
             <div className="space-y-3">
               <div>
-                <label className={`block text-xs font-semibold mb-1 ${currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                <label
+                  className={`block text-xs font-semibold mb-1 ${
+                    currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'
+                  }`}
+                >
                   Nama Lengkap
                 </label>
                 <input
@@ -670,7 +828,11 @@ export default function App() {
               </div>
 
               <div>
-                <label className={`block text-xs font-semibold mb-1 ${currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                <label
+                  className={`block text-xs font-semibold mb-1 ${
+                    currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'
+                  }`}
+                >
                   Asal Instansi
                 </label>
                 <input
@@ -690,7 +852,11 @@ export default function App() {
               </div>
 
               <div>
-                <label className={`block text-xs font-semibold mb-1 ${currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'}`}>
+                <label
+                  className={`block text-xs font-semibold mb-1 ${
+                    currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'
+                  }`}
+                >
                   Nomor WhatsApp
                 </label>
                 <input
@@ -724,7 +890,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setMultiplayerAction('CREATE')}
-                      className={`py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                      className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                         multiplayerAction === 'CREATE'
                           ? 'bg-amber-100 border-amber-400 text-amber-950'
                           : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -735,7 +901,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={() => setMultiplayerAction('JOIN')}
-                      className={`py-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                      className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
                         multiplayerAction === 'JOIN'
                           ? 'bg-amber-100 border-amber-400 text-amber-950'
                           : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -759,7 +925,7 @@ export default function App() {
                       <span>→</span>
                     </button>
                   ) : (
-                    <div className="flex flex-col xs:flex-row gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
                       <input
                         type="text"
                         inputMode="numeric"
@@ -767,12 +933,12 @@ export default function App() {
                         value={joinPinInput}
                         onChange={(e) => setJoinPinInput(e.target.value.replace(/\D/g, ''))}
                         placeholder="4 Digit PIN"
-                        className="w-full xs:w-2/5 h-11 text-center font-mono text-base font-black tracking-widest bg-slate-50 text-slate-900 border-2 border-amber-200 focus:border-amber-500 rounded-xl outline-none"
+                        className="w-full sm:w-2/5 h-11 text-center font-mono text-base font-black tracking-widest bg-slate-50 text-slate-900 border-2 border-amber-200 focus:border-amber-500 rounded-xl outline-none"
                       />
                       <button
                         type="button"
                         onClick={handleJoinRoom}
-                        className="btn-kahoot flex-1 h-11 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs border-b-4 border-amber-700 shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        className="btn-kahoot w-full sm:flex-1 h-11 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs border-b-4 border-amber-700 shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer"
                       >
                         <span>GABUNG ROOM</span>
                         <span>→</span>
@@ -786,11 +952,13 @@ export default function App() {
         )}
 
         {/* ============================================================ */}
-        {/* LAYAR 2: PILIH TOPIK (LAYOUT GRID 2 x 2 RAPIH)               */}
+        {/* LAYAR 2: PILIH TOPIK                                         */}
         {/* ============================================================ */}
         {currentScreen === 'CHOOSE_TOPIC' && (
-          <div className="w-full max-w-2xl mx-auto lg:h-full flex flex-col justify-between py-1 sm:py-2 my-auto">
-            <div className={`flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b ${currentTheme.headerBorder} shrink-0`}>
+          <div className="w-full max-w-2xl mx-auto flex flex-col justify-between py-1 sm:py-2 my-auto">
+            <div
+              className={`flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b ${currentTheme.headerBorder} shrink-0`}
+            >
               <button
                 onClick={() => {
                   playClickSound();
@@ -806,14 +974,24 @@ export default function App() {
                 <span>Kembali</span>
               </button>
 
-              <div className={`text-right text-xs ${currentTheme.isDark ? 'text-slate-300' : 'text-slate-600'} truncate max-w-[70%]`}>
-                <span className={`font-bold ${currentTheme.isDark ? 'text-white' : 'text-slate-900'}`}>{name}</span> ·{' '}
-                {playMode === 'MULTIPLAYER' ? 'Buat Room Bersama' : institution}
+              <div
+                className={`text-right text-xs ${
+                  currentTheme.isDark ? 'text-slate-300' : 'text-slate-600'
+                } truncate max-w-[65%] sm:max-w-[75%]`}
+              >
+                <span
+                  className={`font-bold ${
+                    currentTheme.isDark ? 'text-white' : 'text-slate-900'
+                  }`}
+                >
+                  {name}
+                </span>{' '}
+                · {playMode === 'MULTIPLAYER' ? 'Buat Room Bersama' : institution}
               </div>
             </div>
 
             {/* Grid 2-2 yang rapi untuk semua topik */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 my-4 lg:my-auto py-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 my-3 sm:my-4 py-1">
               {Object.values(BANK_SOAL).map((topic) => (
                 <button
                   key={topic.id}
@@ -828,21 +1006,31 @@ export default function App() {
                     currentTheme.isDark
                       ? 'bg-slate-900/90 hover:bg-slate-800 text-white border-slate-700 hover:border-amber-400 border-b-slate-800 hover:border-b-amber-500'
                       : 'bg-white/95 hover:bg-amber-50/90 text-slate-900 border-amber-200/90 hover:border-amber-400 border-b-amber-300 hover:border-b-amber-500'
-                  } rounded-2xl border-2 border-b-4 shadow-sm text-left flex flex-col justify-between min-h-[7rem] sm:min-h-[7.75rem] cursor-pointer transition-all`}
+                  } rounded-2xl border-2 border-b-4 shadow-sm text-left flex flex-col justify-between min-h-[6rem] sm:min-h-[7.5rem] cursor-pointer transition-all`}
                 >
                   <div className="flex items-center justify-between w-full">
-                    <span className={`w-7 h-7 rounded-lg ${currentTheme.badgeBg} ${currentTheme.badgeText} font-mono text-xs font-bold flex items-center justify-center`}>
+                    <span
+                      className={`w-7 h-7 rounded-lg ${currentTheme.badgeBg} ${currentTheme.badgeText} font-mono text-xs font-bold flex items-center justify-center`}
+                    >
                       {String(topic.id).padStart(2, '0')}
                     </span>
-                    <span className={`text-[11px] font-bold uppercase tracking-wider ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-400'}`}>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                       {topic.nama}
                     </span>
                   </div>
                   <div className="mt-2.5">
-                    <h3 className={`text-sm sm:text-base font-bold ${currentTheme.isDark ? 'text-white' : 'text-slate-900'} leading-snug line-clamp-2`}>
+                    <h3
+                      className={`text-sm sm:text-base font-bold ${
+                        currentTheme.isDark ? 'text-white' : 'text-slate-900'
+                      } leading-snug line-clamp-2`}
+                    >
                       {topic.judul}
                     </h3>
-                    <p className={`text-xs ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'} line-clamp-2 mt-1`}>
+                    <p
+                      className={`text-xs ${
+                        currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+                      } line-clamp-2 mt-1`}
+                    >
                       {topic.deskripsi}
                     </p>
                   </div>
@@ -850,7 +1038,11 @@ export default function App() {
               ))}
             </div>
 
-            <div className={`text-center text-xs font-semibold ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'} shrink-0 pt-1`}>
+            <div
+              className={`text-center text-xs font-semibold ${
+                currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+              } shrink-0 pt-1 pb-2`}
+            >
               <span>
                 {playMode === 'MULTIPLAYER'
                   ? 'Pilih topik untuk membuat Room Live dan mengacak 10 soal'
@@ -864,7 +1056,7 @@ export default function App() {
         {/* LAYAR MULTIPLAYER: LOBBY RUANG TUNGGU (MINIMAL 2 PESERTA)    */}
         {/* ============================================================ */}
         {playMode === 'MULTIPLAYER' && mp.gameStatus === 'LOBBY' && (
-          <div className="w-full max-w-lg bg-white/95 backdrop-blur-md rounded-2xl p-5 sm:p-6 shadow-xl border-2 border-amber-200/90 my-auto text-center animate-pop text-slate-900">
+          <div className="w-full max-w-lg bg-white/95 backdrop-blur-md rounded-2xl p-4 sm:p-6 shadow-xl border-2 border-amber-200/90 my-auto text-center animate-pop text-slate-900">
             <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
               {mp.topicTitle}
             </span>
@@ -882,7 +1074,11 @@ export default function App() {
                   className="p-2 text-slate-500 hover:text-slate-900 hover:bg-amber-100 rounded-lg transition-colors cursor-pointer"
                   title="Salin PIN"
                 >
-                  {copiedPin ? <CheckCheck className="w-5 h-5 text-emerald-600" /> : <Copy className="w-5 h-5" />}
+                  {copiedPin ? (
+                    <CheckCheck className="w-5 h-5 text-emerald-600" />
+                  ) : (
+                    <Copy className="w-5 h-5" />
+                  )}
                 </button>
               </div>
               <span className="text-[11px] text-slate-500 mt-1">
@@ -892,10 +1088,12 @@ export default function App() {
 
             {/* Players List */}
             <div className="mb-4">
-              <div className="flex items-center justify-between text-xs font-bold text-slate-700 px-1 mb-2">
+              <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold text-slate-700 px-1 mb-2">
                 <span>Peserta Terhubung ({mp.players.length})</span>
                 <span className={mp.players.length >= 2 ? 'text-emerald-700' : 'text-amber-700'}>
-                  {mp.players.length >= 2 ? '✓ Siap Bermain (Min. 2 Orang)' : 'Menunggu minimal 2 orang...'}
+                  {mp.players.length >= 2
+                    ? '✓ Siap Bermain (Min. 2 Orang)'
+                    : 'Menunggu minimal 2 orang...'}
                 </span>
               </div>
 
@@ -903,15 +1101,15 @@ export default function App() {
                 {mp.players.map((p, idx) => (
                   <div
                     key={p.id}
-                    className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200 text-left"
+                    className="flex items-center justify-between gap-2 p-2.5 bg-white rounded-lg border border-slate-200 text-left"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <span className="w-6 text-center text-xs font-mono font-bold text-slate-400">
+                      <span className="w-6 text-center text-xs font-mono font-bold text-slate-400 shrink-0">
                         #{idx + 1}
                       </span>
                       <div className="truncate">
                         <div className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
-                          <span>{p.name}</span>
+                          <span className="truncate">{p.name}</span>
                           {idx === 0 && <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
                         </div>
                         <div className="text-[10px] text-slate-400 truncate">{p.institution}</div>
@@ -933,12 +1131,12 @@ export default function App() {
                 disabled={mp.players.length < 2}
                 className="btn-kahoot w-full h-12 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-extrabold rounded-xl text-xs sm:text-sm border-b-4 border-emerald-800 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Play className="w-4 h-4 fill-white" />
+                <Play className="w-4 h-4 fill-white shrink-0" />
                 <span>MULAI KUIS BERSAMA ({mp.players.length} Peserta)</span>
               </button>
             ) : (
               <div className="p-3 bg-amber-100/70 border border-amber-300 rounded-xl text-xs font-bold text-amber-950 flex items-center justify-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping" />
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping shrink-0" />
                 <span>Menunggu Host memulai kuis bersama...</span>
               </div>
             )}
@@ -958,21 +1156,27 @@ export default function App() {
         {/* LAYAR 3: KUIS (DENGAN COUNTDOWN AKTIF & OPSI FULL TEXT)      */}
         {/* ============================================================ */}
         {isPlaying && activeQuestion && (
-          <div className="w-full lg:h-full flex flex-col justify-between max-w-4xl py-1 gap-2 sm:gap-3 my-auto">
+          <div className="w-full flex-1 flex flex-col justify-between max-w-4xl py-1 gap-2 sm:gap-3 my-auto min-h-0">
             {/* Header: Timer Bar, Soal Index & Live Leaderboard Ticker */}
             <div className="w-full shrink-0">
               <div className="flex items-center justify-between gap-2 text-xs font-bold mb-1.5 px-0.5 tabular-nums">
                 <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-                  <span className={`font-mono px-2 py-0.5 rounded border shrink-0 ${
-                    currentTheme.isDark
-                      ? 'text-cyan-300 bg-slate-800/90 border-slate-700'
-                      : 'text-slate-600 bg-white/80 border-slate-200'
-                  }`}>
+                  <span
+                    className={`font-mono px-2 py-0.5 rounded border shrink-0 ${
+                      currentTheme.isDark
+                        ? 'text-cyan-300 bg-slate-800/90 border-slate-700'
+                        : 'text-slate-600 bg-white/80 border-slate-200'
+                    }`}
+                  >
                     {activeQuestion.kode}
                   </span>
-                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded truncate ${
-                    currentTheme.isDark ? 'bg-slate-800 text-amber-300' : 'bg-amber-100 text-amber-900'
-                  }`}>
+                  <span
+                    className={`hidden xs:inline-block sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded truncate ${
+                      currentTheme.isDark
+                        ? 'bg-slate-800 text-amber-300'
+                        : 'bg-amber-100 text-amber-900'
+                    }`}
+                  >
                     {currentTheme.name}
                   </span>
                   {playMode === 'MULTIPLAYER' && (
@@ -982,8 +1186,10 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                  <span className={`text-xs font-black px-2.5 py-0.5 rounded-full border shadow-xs ${currentTheme.badgeBg} ${currentTheme.badgeBorder} ${currentTheme.badgeText}`}>
+                <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+                  <span
+                    className={`text-xs font-black px-2 sm:px-2.5 py-0.5 rounded-full border shadow-xs ${currentTheme.badgeBg} ${currentTheme.badgeBorder} ${currentTheme.badgeText}`}
+                  >
                     {score} Poin
                   </span>
 
@@ -1003,7 +1209,11 @@ export default function App() {
               </div>
 
               {/* Shimmering Animated Timer Bar */}
-              <div className={`w-full h-2.5 ${currentTheme.isDark ? 'bg-slate-800/90' : 'bg-slate-200/80'} rounded-full overflow-hidden p-0.5 shadow-inner`}>
+              <div
+                className={`w-full h-2 sm:h-2.5 ${
+                  currentTheme.isDark ? 'bg-slate-800/90' : 'bg-slate-200/80'
+                } rounded-full overflow-hidden p-0.5 shadow-inner`}
+              >
                 <div
                   className={`h-full rounded-full transition-all duration-75 ease-linear ${
                     remainingSeconds <= 2
@@ -1016,22 +1226,33 @@ export default function App() {
                 />
               </div>
 
-              {/* Multiplayer Temporary Live Leaderboard Ticker Bar (tetap menampilkan peserta yang sudah keluar) */}
+              {/* Multiplayer Temporary Live Leaderboard Ticker Bar */}
               {playMode === 'MULTIPLAYER' && (
-                <div className={`mt-1.5 px-3 py-1.5 ${
-                  currentTheme.isDark ? 'bg-slate-900/95 border-slate-700 text-white' : 'bg-white/90 border-amber-200 text-slate-800'
-                } backdrop-blur-xs rounded-xl border flex items-center justify-between gap-2 text-xs overflow-x-auto shadow-xs`}>
-                  <span className={`text-[11px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1 ${
-                    currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}>
+                <div
+                  className={`mt-1.5 px-2.5 sm:px-3 py-1.5 ${
+                    currentTheme.isDark
+                      ? 'bg-slate-900/95 border-slate-700 text-white'
+                      : 'bg-white/90 border-amber-200 text-slate-800'
+                  } backdrop-blur-xs rounded-xl border flex items-center justify-between gap-2 text-xs overflow-x-auto shadow-xs`}
+                >
+                  <span
+                    className={`text-[11px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1 ${
+                      currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                     <Trophy className="w-3.5 h-3.5 text-amber-500" />
                     <span>Live Room:</span>
                   </span>
                   <div className="flex items-center gap-3 shrink-0">
                     {liveMultiplayerLeaderboard.slice(0, 5).map((p, idx) => (
-                      <span key={p.id} className={`flex items-center gap-1 font-bold ${currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                      <span
+                        key={p.id}
+                        className={`flex items-center gap-1 font-bold ${
+                          currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'
+                        }`}
+                      >
                         <span className="text-amber-500 font-mono">#{idx + 1}</span>
-                        <span className="truncate max-w-[85px] sm:max-w-[110px]">{p.name}</span>
+                        <span className="truncate max-w-[80px] sm:max-w-[110px]">{p.name}</span>
                         <span className="font-mono text-xs opacity-60">({p.score})</span>
                         {p.hasAnsweredCurrent && (
                           <span className="text-[10px] text-emerald-500 font-black">✓</span>
@@ -1043,14 +1264,16 @@ export default function App() {
               )}
             </div>
 
-            {/* Question Card */}
-            <div className={`${currentTheme.questionCardBg} ${currentTheme.questionCardBorder} rounded-2xl p-4 sm:p-5 border-2 shadow-lg my-auto flex flex-col items-center justify-center min-h-[110px] sm:min-h-[140px] lg:max-h-[340px] overflow-hidden`}>
+            {/* Question Card (Responsif & scrollable jika teks soal sangat panjang) */}
+            <div
+              className={`${currentTheme.questionCardBg} ${currentTheme.questionCardBorder} rounded-2xl p-3.5 sm:p-5 border-2 shadow-lg my-auto flex flex-col items-center justify-center min-h-[100px] sm:min-h-[130px] max-h-[38dvh] lg:max-h-[42dvh] overflow-y-auto`}
+            >
               {activeQuestion.gambar && activeQuestion.gambar.trim() !== '' && (
-                <div className="w-full mb-2.5 flex items-center justify-center overflow-hidden shrink-0">
+                <div className="w-full mb-2.5 flex items-center justify-center shrink-0">
                   <img
                     src={activeQuestion.gambar}
                     alt={`Soal ${activeQuestion.kode}`}
-                    className="w-auto max-w-full h-auto max-h-32 sm:max-h-40 md:max-h-44 object-contain rounded-xl border border-slate-200/80 shadow-xs"
+                    className="w-auto max-w-full h-auto max-h-28 sm:max-h-36 md:max-h-44 object-contain rounded-xl border border-slate-200/80 shadow-xs"
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
@@ -1058,9 +1281,11 @@ export default function App() {
                 </div>
               )}
 
-              <p className={`w-full text-sm sm:text-base md:text-lg font-bold leading-relaxed text-center ${
-                currentTheme.isDark ? 'text-white' : 'text-slate-900'
-              }`}>
+              <p
+                className={`w-full text-sm sm:text-base md:text-lg font-bold leading-relaxed text-center break-words ${
+                  currentTheme.isDark ? 'text-white' : 'text-slate-900'
+                }`}
+              >
                 {activeQuestion.pertanyaan}
               </p>
             </div>
@@ -1084,7 +1309,8 @@ export default function App() {
                   },
                   {
                     symbol: '●',
-                    baseBg: 'bg-amber-400 hover:bg-amber-300 border-amber-600 text-amber-950 font-bold',
+                    baseBg:
+                      'bg-amber-400 hover:bg-amber-300 border-amber-600 text-amber-950 font-bold',
                     symbolBg: 'bg-amber-600/40 text-amber-950',
                   },
                   {
@@ -1100,7 +1326,8 @@ export default function App() {
 
                 if (isAnswerLocked) {
                   if (isCorrect) {
-                    buttonClass = 'bg-emerald-500 border-emerald-700 text-white ring-4 ring-emerald-300';
+                    buttonClass =
+                      'bg-emerald-500 border-emerald-700 text-white ring-4 ring-emerald-300';
                     animClass = 'animate-pop';
                   } else if (isSelected && !isCorrect) {
                     buttonClass = 'bg-rose-600 border-rose-800 text-white ring-4 ring-rose-300';
@@ -1115,7 +1342,7 @@ export default function App() {
                     key={`${activeQuestion.kode}_opt_${idx}`}
                     onClick={() => handleAnswerClick(option)}
                     disabled={isAnswerLocked}
-                    className={`btn-kahoot relative flex items-center justify-between p-3 sm:p-3.5 rounded-2xl border-b-[5px] shadow-md text-left transition-all min-h-[56px] sm:min-h-[68px] h-auto cursor-pointer disabled:cursor-not-allowed ${buttonClass} ${animClass}`}
+                    className={`btn-kahoot relative flex items-center justify-between p-2.5 sm:p-3.5 rounded-2xl border-b-[5px] shadow-md text-left transition-all min-h-[52px] sm:min-h-[64px] h-auto cursor-pointer disabled:cursor-not-allowed ${buttonClass} ${animClass}`}
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">
                       <span
@@ -1145,20 +1372,46 @@ export default function App() {
         {/* LAYAR 4A: HASIL KUIS SOLO (TANPA TIMER OTOMATIS KEMBALI)     */}
         {/* ============================================================ */}
         {playMode === 'SOLO' && currentScreen === 'RESULT' && (
-          <div className={`w-full max-w-sm ${currentTheme.cardBg} rounded-2xl p-6 sm:p-7 border-2 ${currentTheme.cardBorder} text-center shadow-xl animate-pop my-auto`}>
-            <h2 className={`text-lg sm:text-xl font-bold ${currentTheme.isDark ? 'text-white' : 'text-slate-900'}`}>Hasil Kuis Solo</h2>
-            <p className={`text-xs ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'} mt-0.5`}>
+          <div
+            className={`w-full max-w-sm ${currentTheme.cardBg} rounded-2xl p-5 sm:p-7 border-2 ${currentTheme.cardBorder} text-center shadow-xl animate-pop my-auto`}
+          >
+            <h2
+              className={`text-lg sm:text-xl font-bold ${
+                currentTheme.isDark ? 'text-white' : 'text-slate-900'
+              }`}
+            >
+              Hasil Kuis Solo
+            </h2>
+            <p
+              className={`text-xs ${
+                currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+              } mt-0.5 break-words`}
+            >
               {name} · {institution}
             </p>
 
-            <div className={`my-5 p-4 ${currentTheme.isDark ? 'bg-slate-800/80 border-slate-700' : 'bg-gradient-to-b from-amber-50 to-emerald-50 border-amber-200'} rounded-xl border`}>
+            <div
+              className={`my-5 p-4 ${
+                currentTheme.isDark
+                  ? 'bg-slate-800/80 border-slate-700'
+                  : 'bg-gradient-to-b from-amber-50 to-emerald-50 border-amber-200'
+              } rounded-xl border`}
+            >
               <div className="text-4xl sm:text-5xl font-black tabular-nums text-amber-500 tracking-tight">
                 {score}
               </div>
-              <div className={`text-xs font-bold ${currentTheme.isDark ? 'text-slate-300' : 'text-slate-600'} mt-1 tabular-nums`}>
+              <div
+                className={`text-xs font-bold ${
+                  currentTheme.isDark ? 'text-slate-300' : 'text-slate-600'
+                } mt-1 tabular-nums`}
+              >
                 {correctAnswersCount} dari {soloQuestions.length} soal benar
               </div>
-              <div className={`text-[11px] mt-1.5 ${currentTheme.isDark ? 'text-emerald-400' : 'text-emerald-700'} font-semibold`}>
+              <div
+                className={`text-[11px] mt-1.5 ${
+                  currentTheme.isDark ? 'text-emerald-400' : 'text-emerald-700'
+                } font-semibold`}
+              >
                 Skor tercatat di Papan Skor Global
               </div>
             </div>
@@ -1176,27 +1429,57 @@ export default function App() {
         {/* LAYAR 4B: PODIUM KEMENANGAN MULTIPLAYER (TEMPORARY ROOM)     */}
         {/* ============================================================ */}
         {playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED' && (
-          <div className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-5 sm:p-6 border-2 ${currentTheme.cardBorder} shadow-xl my-auto animate-pop text-center`}>
-            <span className={`text-xs font-bold uppercase tracking-wider ${currentTheme.isDark ? 'text-amber-300' : 'text-amber-800'}`}>
+          <div
+            className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-4 sm:p-6 border-2 ${currentTheme.cardBorder} shadow-xl my-auto animate-pop text-center`}
+          >
+            <span
+              className={`text-xs font-bold uppercase tracking-wider ${
+                currentTheme.isDark ? 'text-amber-300' : 'text-amber-800'
+              }`}
+            >
               {mp.topicTitle}
             </span>
-            <h2 className={`text-lg sm:text-xl font-black ${currentTheme.isDark ? 'text-white' : 'text-slate-900'} mt-1 mb-4`}>
+            <h2
+              className={`text-lg sm:text-xl font-black ${
+                currentTheme.isDark ? 'text-white' : 'text-slate-900'
+              } mt-1 mb-4`}
+            >
               Podium Juara Quiz Inagata
             </h2>
 
-            {/* Kahoot 3-Step Podium (Tetap menyimpan peserta meski sudah logout) */}
+            {/* Kahoot 3-Step Podium */}
             <div className="flex items-end justify-center gap-2 sm:gap-3 mb-5 px-1 sm:px-2 h-36">
               {/* Rank 2 (Silver) */}
               {finalLeaderboardDisplay[1] ? (
                 <div className="flex-1 min-w-0 flex flex-col items-center">
-                  <div className={`text-xs font-bold truncate w-full px-1 ${currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                  <div
+                    className={`text-xs font-bold truncate w-full px-1 ${
+                      currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'
+                    }`}
+                  >
                     {finalLeaderboardDisplay[1].name}
                   </div>
-                  <div className={`text-[11px] font-mono font-bold ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <div
+                    className={`text-[11px] font-mono font-bold ${
+                      currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                     {finalLeaderboardDisplay[1].score} pt
                   </div>
-                  <div className={`w-full h-20 ${currentTheme.isDark ? 'bg-slate-700 border-slate-600' : 'bg-slate-200 border-slate-300'} border-2 rounded-t-xl flex flex-col items-center justify-center shadow-xs mt-1`}>
-                    <span className={`text-sm font-black ${currentTheme.isDark ? 'text-white' : 'text-slate-700'}`}>#2</span>
+                  <div
+                    className={`w-full h-20 ${
+                      currentTheme.isDark
+                        ? 'bg-slate-700 border-slate-600'
+                        : 'bg-slate-200 border-slate-300'
+                    } border-2 rounded-t-xl flex flex-col items-center justify-center shadow-xs mt-1`}
+                  >
+                    <span
+                      className={`text-sm font-black ${
+                        currentTheme.isDark ? 'text-white' : 'text-slate-700'
+                      }`}
+                    >
+                      #2
+                    </span>
                   </div>
                 </div>
               ) : (
@@ -1222,10 +1505,18 @@ export default function App() {
               {/* Rank 3 (Bronze) */}
               {finalLeaderboardDisplay[2] ? (
                 <div className="flex-1 min-w-0 flex flex-col items-center">
-                  <div className={`text-xs font-bold truncate w-full px-1 ${currentTheme.isDark ? 'text-amber-200' : 'text-amber-900'}`}>
+                  <div
+                    className={`text-xs font-bold truncate w-full px-1 ${
+                      currentTheme.isDark ? 'text-amber-200' : 'text-amber-900'
+                    }`}
+                  >
                     {finalLeaderboardDisplay[2].name}
                   </div>
-                  <div className={`text-[11px] font-mono font-bold ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  <div
+                    className={`text-[11px] font-mono font-bold ${
+                      currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+                    }`}
+                  >
                     {finalLeaderboardDisplay[2].score} pt
                   </div>
                   <div className="w-full h-16 bg-amber-600/30 border-2 border-amber-600/40 rounded-t-xl flex flex-col items-center justify-center shadow-xs mt-1">
@@ -1238,16 +1529,34 @@ export default function App() {
             </div>
 
             {/* Complete Rankings List */}
-            <div className={`max-h-36 overflow-y-auto space-y-1 p-2 ${currentTheme.isDark ? 'bg-slate-800/90 border-slate-700' : 'bg-slate-50 border-slate-200'} rounded-xl border mb-4 text-left`}>
+            <div
+              className={`max-h-36 overflow-y-auto space-y-1 p-2 ${
+                currentTheme.isDark
+                  ? 'bg-slate-800/90 border-slate-700'
+                  : 'bg-slate-50 border-slate-200'
+              } rounded-xl border mb-4 text-left`}
+            >
               {finalLeaderboardDisplay.map((p, idx) => (
                 <div
                   key={p.id}
-                  className={`flex items-center justify-between gap-2 p-2 ${currentTheme.isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'} rounded-lg border text-xs`}
+                  className={`flex items-center justify-between gap-2 p-2 ${
+                    currentTheme.isDark
+                      ? 'bg-slate-900 border-slate-800 text-white'
+                      : 'bg-white border-slate-200 text-slate-900'
+                  } rounded-lg border text-xs`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-mono font-bold text-slate-400 w-5 shrink-0">#{idx + 1}</span>
+                    <span className="font-mono font-bold text-slate-400 w-5 shrink-0">
+                      #{idx + 1}
+                    </span>
                     <span className="font-bold truncate">{p.name}</span>
-                    <span className={`text-[11px] ${currentTheme.isDark ? 'text-slate-400' : 'text-slate-400'} truncate`}>({p.institution})</span>
+                    <span
+                      className={`text-[11px] ${
+                        currentTheme.isDark ? 'text-slate-400' : 'text-slate-400'
+                      } truncate`}
+                    >
+                      ({p.institution})
+                    </span>
                   </div>
                   <span className="font-mono font-black text-amber-500 tabular-nums shrink-0">
                     {p.score} pt
@@ -1268,7 +1577,9 @@ export default function App() {
       </main>
 
       {/* Global Footer */}
-      <footer className={`relative z-20 w-full px-4 py-2 border-t ${currentTheme.footerBorder} ${currentTheme.footerBg} text-center shrink-0 transition-colors duration-300`}>
+      <footer
+        className={`relative z-20 w-full px-4 py-2 border-t ${currentTheme.footerBorder} ${currentTheme.footerBg} text-center shrink-0 transition-colors duration-300`}
+      >
         <p className={`text-xs font-semibold ${currentTheme.footerText}`}>
           Quiz Inagata · Tema {currentTheme.name}
         </p>
