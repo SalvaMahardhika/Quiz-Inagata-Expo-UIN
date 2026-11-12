@@ -1001,13 +1001,13 @@ export default function App() {
             </div>
 
             {/* Question Card */}
-            <div className={`${currentTheme.questionCardBg} ${currentTheme.questionCardBorder} rounded-2xl p-4 sm:p-6 border-2 shadow-lg my-auto flex flex-col justify-center min-h-[110px] sm:min-h-[140px] lg:max-h-[240px] overflow-y-auto`}>
+            <div className={`${currentTheme.questionCardBg} ${currentTheme.questionCardBorder} rounded-2xl p-4 sm:p-5 border-2 shadow-lg my-auto flex flex-col items-center justify-center min-h-[110px] sm:min-h-[140px] lg:max-h-[340px] overflow-hidden`}>
               {activeQuestion.gambar && activeQuestion.gambar.trim() !== '' && (
-                <div className="mb-2.5 flex justify-center">
+                <div className="w-full mb-2.5 flex items-center justify-center overflow-hidden shrink-0">
                   <img
                     src={activeQuestion.gambar}
                     alt={`Soal ${activeQuestion.kode}`}
-                    className="max-h-28 sm:max-h-36 object-contain rounded-xl border border-slate-200 shadow-xs"
+                    className="w-auto max-w-full h-auto max-h-32 sm:max-h-40 md:max-h-44 object-contain rounded-xl border border-slate-200/80 shadow-xs"
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = 'none';
                     }}
@@ -1015,7 +1015,7 @@ export default function App() {
                 </div>
               )}
 
-              <p className={`text-sm sm:text-base md:text-lg font-bold leading-relaxed text-center ${
+              <p className={`w-full text-sm sm:text-base md:text-lg font-bold leading-relaxed text-center ${
                 currentTheme.isDark ? 'text-white' : 'text-slate-900'
               }`}>
                 {activeQuestion.pertanyaan}
