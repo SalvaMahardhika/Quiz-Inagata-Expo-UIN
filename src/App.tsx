@@ -8,6 +8,7 @@ import confetti from 'canvas-confetti';
 import {
   BANK_SOAL,
   TopicPackage,
+  GOOGLE_SCRIPT_URL,
 } from './data/bankSoal';
 import {
   prepareTeacherQuiz,
@@ -321,6 +322,41 @@ export default function App() {
   }, [playMode, mp.gameStatus]);
 
   // ============================================================
+  // REALTIME LOGGING KE GOOGLE SPREADSHEET (NON-BLOCKING)
+  // ============================================================
+  const logParticipantLogin = useCallback(
+    (modeLabel: string, detailLabel: string) => {
+      if (!GOOGLE_SCRIPT_URL || !GOOGLE_SCRIPT_URL.trim()) return;
+
+      try {
+        const payload = {
+          name: name.trim(),
+          institution: institution.trim(),
+          phone: phone.trim(),
+          mode: modeLabel,
+          detail: detailLabel,
+          origin: window.location.origin || 'https://quiz-inagata.ai.studio/',
+        };
+
+        fetch(GOOGLE_SCRIPT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          keepalive: true,
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8',
+          },
+          body: JSON.stringify(payload),
+        }).catch(() => {
+          // Abaikan error jaringan agar tidak mengganggu alur permainan
+        });
+      } catch {
+        // Abaikan error runtime agar tidak mengganggu alur permainan
+      }
+    },
+    [name, institution, phone]
+  );
+
+  // ============================================================
   // REGISTRATION & GAMEPLAY HANDLERS
   // ============================================================
   const validateForm = () => {
@@ -344,12 +380,18 @@ export default function App() {
     e.preventDefault();
     playClickSound();
     if (!validateForm()) return;
+    logParticipantLogin('Mode Solo', 'Registrasi Masuk Solo');
     setCurrentScreen('CHOOSE_TOPIC');
   };
 
   const handleCreateRoom = (topicId: number) => {
     playClickSound();
     if (!validateForm()) return;
+    const topic = BANK_SOAL[topicId];
+    logParticipantLogin(
+      'Bermain Bersama (Host)',
+      topic ? `Buat Room - ${topic.nama}: ${topic.judul}` : `Buat Room Topik ${topicId}`
+    );
     setCachedMultiplayerRoster([]);
     mp.createRoom(name.trim(), institution.trim(), topicId);
   };
@@ -362,6 +404,7 @@ export default function App() {
       setFormError('Masukkan 4 digit PIN Room.');
       return;
     }
+    logParticipantLogin('Bermain Bersama (Peserta)', `Gabung Room PIN ${joinPinInput.trim()}`);
     setCachedMultiplayerRoster([]);
     mp.joinRoom(joinPinInput.trim(), name.trim(), institution.trim());
   };
