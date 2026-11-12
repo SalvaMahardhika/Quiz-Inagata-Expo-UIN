@@ -96,7 +96,7 @@ export const BANK_SOAL: Record<number, TopicPackage> = {
       },
       {
         kode: "T1-08",
-        pertanyaan: "Pahlawan nasional asal Maluku yang memimpin perlawanan di Saparua dan wajahnya diabadikan pada pecahan uang Rp1.000 adalah...",
+        pertanyaan: "Pahlawan nasional asal Maluku yang memimpin perlawanan di Saparua dan wajahnya pernah diabadikan pada uang kertas pecahan Rp1.000 adalah...",
         gambar: "",
         pilihan: ["Frans Kaisiepo", "Silas Papare", "Thomas Matulessy (Pattimura)", "Johannes Leimena"],
         jawabanBenar: 2,
@@ -159,7 +159,7 @@ export const BANK_SOAL: Record<number, TopicPackage> = {
       },
       {
         kode: "T1-17",
-        pertanyaan: "Nama asli Ki Hajar Dewantara sebelum berganti nama pada usia 40 tahun adalah...",
+        pertanyaan: "Nama asli Ki Hadjar Dewantara sebelum berganti nama pada usia 40 tahun adalah...",
         gambar: "",
         pilihan: ["Suwardi Suryaningrat", "Tirto Adhi Soerjo", "Sosrokartono", "Wahidin Sudirohusodo"],
         jawabanBenar: 0,
@@ -435,7 +435,7 @@ export const BANK_SOAL: Record<number, TopicPackage> = {
       },
       {
         kode: "T2-25",
-        pertanyaan: "Penjelajah asal Maroko yang pernah singgah dan mencatat kemakmuran Samudra Pasai bernama...",
+        pertanyaan: "Penjelajah asal Maroko yang pernah singgah dan mencatat kemakmuran Samudera Pasai bernama...",
         gambar: "",
         pilihan: ["Marco Polo", "Ibnu Battuta", "Vasco da Gama", "Alfonso de Albuquerque"],
         jawabanBenar: 1,
@@ -819,7 +819,7 @@ export const BANK_SOAL: Record<number, TopicPackage> = {
       },
       {
         kode: "T4-17",
-        pertanyaan: "Topeng kepala singa berhias bulu merak seberat 50 kg pada Reog Ponorogo diangkat dengan cara...",
+        pertanyaan: "Topeng kepala singa berhias bulu merak seberat sekitar 50 kg pada Reog Ponorogo diangkat dengan cara...",
         gambar: "",
         pilihan: ["Diikat di bahu", "Digigit", "Disangga tongkat", "Dipegang tangan"],
         jawabanBenar: 1,
@@ -990,7 +990,7 @@ export const BANK_SOAL: Record<number, TopicPackage> = {
       },
       {
         kode: "T5-10",
-        pertanyaan: "Upacara memperingati kesaktian Pancasila dan mengenang para pahlawan revolusi diperingati setiap tanggal...",
+        pertanyaan: "Upacara memperingati Hari Kesaktian Pancasila diperingati setiap tanggal...",
         gambar: "",
         pilihan: ["17 Agustus", "1 Oktober", "30 September", "10 November"],
         jawabanBenar: 1,
@@ -1161,7 +1161,7 @@ export const BANK_SOAL: Record<number, TopicPackage> = {
       },
       {
         kode: "T6-03",
-        pertanyaan: "Suku bangsa pelaut ulung yang terkenal dengan perahu tradisional Phinisi di Sulawesi Selatan adalah suku...",
+        pertanyaan: "Suku bangsa pelaut ulung yang terkenal dengan perahu tradisional Pinisi di Sulawesi Selatan adalah suku...",
         gambar: "",
         pilihan: ["Bugis dan Makassar", "Gorontalo", "Minahasa", "Toraja"],
         jawabanBenar: 0,
@@ -1329,7 +1329,7 @@ export const BANK_SOAL: Record<number, TopicPackage> = {
       },
       {
         kode: "T6-27",
-        pertanyaan: "Kapal layar kayu tradisional berdua tiang dan tujuh layar mahakarya Suku Bugis-Makassar adalah kapal...",
+        pertanyaan: "Kapal layar kayu tradisional bertiang dua dan tujuh layar mahakarya Suku Bugis-Makassar adalah kapal...",
         gambar: "",
         pilihan: ["Lancang Kuning", "Pinisi", "Kora-Kora", "Jung"],
         jawabanBenar: 1,
