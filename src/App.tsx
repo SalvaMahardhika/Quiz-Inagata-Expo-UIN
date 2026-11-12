@@ -187,7 +187,6 @@ export default function App() {
           detail: payloadData.detail,
         };
 
-        // Menggunakan URLSearchParams agar kompatibel dengan e.parameter maupun e.postData di Google Apps Script
         const formBody = new URLSearchParams(fullPayload).toString();
 
         fetch(GOOGLE_SCRIPT_URL, {
@@ -198,17 +197,13 @@ export default function App() {
             'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
           },
           body: formBody,
-        }).catch(() => {
-          // Abaikan error jaringan agar tidak mengganggu alur permainan
-        });
-      } catch {
-        // Abaikan error runtime agar tidak mengganggu alur permainan
-      }
+        }).catch(() => {});
+      } catch {}
     },
     [name, institution, phone]
   );
 
-  // Sinkronisasi roster multiplayer agar user yang logout saat PLAYING/FINISHED tidak hilang dari papan peringkat sementara
+  // Sinkronisasi roster multiplayer agar user yang logout saat PLAYING/FINISHED tidak hilang
   useEffect(() => {
     if (playMode !== 'MULTIPLAYER') return;
 
@@ -262,7 +257,7 @@ export default function App() {
   const activeQuestion = currentQuestions[currentQIndex];
   const isPlaying = playMode === 'MULTIPLAYER' ? mp.gameStatus === 'PLAYING' : currentScreen === 'QUIZ';
 
-  // Solo next question helper (Hanya mode SOLO yang menyimpan ke Leaderboard Global)
+  // Solo next question helper
   const moveToNextSoloQuestion = useCallback(
     (latestScore = score, latestCorrect = correctAnswersCount) => {
       const nextIndex = soloQuestionIndex + 1;
@@ -272,7 +267,6 @@ export default function App() {
         setIsAnswerLocked(false);
         isAnswerLockedRef.current = false;
       } else {
-        // Cegah pemanggilan ganda saat selesai Solo
         if (hasLoggedSoloFinishRef.current) return;
         hasLoggedSoloFinishRef.current = true;
 
@@ -294,7 +288,6 @@ export default function App() {
           });
         }
 
-        // Kirim hasil akhir Solo ke Spreadsheet (1x saja saat selesai)
         sendResultToSpreadsheet({
           mode: 'Mode Solo',
           topic: topicFullName,
@@ -320,7 +313,6 @@ export default function App() {
     ]
   );
 
-  // Stable timeout ref for per-participant countdown
   const handleTimeOutRef = useRef<() => void>(() => {});
   useEffect(() => {
     handleTimeOutRef.current = () => {
@@ -339,9 +331,7 @@ export default function App() {
     };
   }, [playMode, moveToNextSoloQuestion, mp, currentQIndex]);
 
-  // ============================================================
-  // PER-PARTICIPANT COUNTDOWN TIMER
-  // ============================================================
+  // Countdown Timer
   useEffect(() => {
     if (!isPlaying || !activeQuestion) {
       setTimeRemainingMs(QUESTION_DURATION_SEC * 1000);
@@ -385,7 +375,7 @@ export default function App() {
     };
   }, [isPlaying, currentQIndex, activeQuestion?.kode]);
 
-  // Confetti & fanfare pada layar hasil Solo (tanpa auto-reset timer)
+  // Confetti & fanfare Solo result
   useEffect(() => {
     if (playMode === 'SOLO' && currentScreen === 'RESULT') {
       try {
@@ -395,14 +385,12 @@ export default function App() {
           origin: { y: 0.6 },
           colors: ['#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#8b5cf6'],
         });
-      } catch {
-        // ignore
-      }
+      } catch {}
       playFanfareSound();
     }
   }, [currentScreen, playMode]);
 
-  // Confetti & Spreadsheet logging saat multiplayer game over (1x saja saat selesai)
+  // Confetti & Spreadsheet logging Multiplayer finish
   useEffect(() => {
     if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED') {
       if (!hasLoggedMpFinishRef.current) {
@@ -430,9 +418,7 @@ export default function App() {
           origin: { y: 0.5 },
           colors: ['#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#8b5cf6'],
         });
-      } catch {
-        // ignore
-      }
+      } catch {}
       playFanfareSound();
     }
   }, [
@@ -450,9 +436,6 @@ export default function App() {
     sendResultToSpreadsheet,
   ]);
 
-  // ============================================================
-  // REGISTRATION & GAMEPLAY HANDLERS
-  // ============================================================
   const validateForm = () => {
     if (!name.trim()) {
       setFormError('Nama lengkap wajib diisi.');
@@ -581,7 +564,6 @@ export default function App() {
     Math.min(100, (timeRemainingMs / (QUESTION_DURATION_SEC * 1000)) * 100)
   );
 
-  // Daftar peserta temporary multiplayer yang tetap menyimpan user meskipun sudah logout
   const liveMultiplayerLeaderboard =
     cachedMultiplayerRoster.length > 0 ? cachedMultiplayerRoster : mp.players;
 
@@ -598,14 +580,13 @@ export default function App() {
         currentTheme.isDark ? 'text-white' : 'text-slate-900'
       } transition-colors duration-300`}
     >
-      {/* Dynamic Animated Backdrop based on Active Theme */}
+      {/* Dynamic Animated Backdrop */}
       <ThemeBackdrop themeId={themeId} />
 
       {/* Top Bar */}
       <header
         className={`relative z-20 w-full px-3 sm:px-5 py-2 sm:py-2.5 flex items-center justify-between gap-2 border-b ${currentTheme.headerBorder} ${currentTheme.headerBg} shrink-0 shadow-xs transition-colors duration-300 select-none`}
       >
-        {/* Left: Brand title ONLY */}
         <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
           <span
             className={`text-sm sm:text-lg font-extrabold tracking-tight truncate ${
@@ -625,7 +606,6 @@ export default function App() {
           )}
         </div>
 
-        {/* Zone 2: Progress indicator */}
         {isPlaying ? (
           <div
             className={`px-2 sm:px-3 py-0.5 sm:py-1 ${currentTheme.badgeBg} border ${currentTheme.badgeBorder} rounded-full text-[11px] sm:text-xs font-bold ${currentTheme.badgeText} tabular-nums shadow-xs shrink-0`}
@@ -636,9 +616,7 @@ export default function App() {
           <div className="hidden sm:block" />
         )}
 
-        {/* Zone 3: Actions */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          {/* Quick Theme Switcher Button */}
           <button
             onClick={() => {
               playClickSound();
@@ -657,7 +635,6 @@ export default function App() {
 
           {currentScreen === 'REGISTRATION' && mp.gameStatus === 'IDLE' && (
             <>
-              {/* Papan Skor Global HANYA muncul di Mode Solo */}
               {playMode === 'SOLO' && (
                 <button
                   onClick={() => {
@@ -709,17 +686,225 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Viewport Container (Responsif & bisa di-scroll mulus di HP, Tablet, maupun Laptop) */}
+      {/* Main Viewport Container */}
       <main className="relative z-10 flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y px-3 sm:px-6 md:px-8 py-4 sm:py-6">
         <div className="min-h-full w-full max-w-4xl mx-auto flex flex-col items-center justify-center">
+          
           {/* ============================================================ */}
-          {/* LAYAR 1: REGISTRASI & MODE SWITCHER                          */}
+          {/* RENDER KONDISIONAL BERDASARKAN ALUR & STATUS KUIS AKTIF       */}
           {/* ============================================================ */}
-          {currentScreen === 'REGISTRATION' && mp.gameStatus === 'IDLE' && (
+
+          {/* 1. KUIS SEDANG BERJALAN (SOLO / MULTIPLAYER PLAYING) */}
+          {isPlaying && activeQuestion ? (
+            <div className="w-full flex flex-col justify-between max-w-4xl gap-2.5 sm:gap-3">
+              <div className="w-full shrink-0">
+                <div className="flex items-center justify-between gap-2 text-xs font-bold mb-1.5 px-0.5 tabular-nums">
+                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                    <span
+                      className={`font-mono px-2 py-0.5 rounded border shrink-0 ${
+                        currentTheme.isDark
+                          ? 'text-cyan-300 bg-slate-800/90 border-slate-700'
+                          : 'text-slate-600 bg-white/80 border-slate-200'
+                      }`}
+                    >
+                      {activeQuestion.kode}
+                    </span>
+                    <span
+                      className={`hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded truncate ${
+                        currentTheme.isDark
+                          ? 'bg-slate-800 text-amber-300'
+                          : 'bg-amber-100 text-amber-900'
+                      }`}
+                    >
+                      {currentTheme.name}
+                    </span>
+                    {playMode === 'MULTIPLAYER' && (
+                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded shrink-0">
+                        Live
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+                    <span
+                      className={`text-xs font-black px-2 sm:px-2.5 py-0.5 rounded-full border shadow-xs ${currentTheme.badgeBg} ${currentTheme.badgeBorder} ${currentTheme.badgeText}`}
+                    >
+                      {score} Poin
+                    </span>
+
+                    <span
+                      className={`font-mono text-xs sm:text-sm font-black px-2 py-0.5 rounded-md transition-colors ${
+                        remainingSeconds <= 2
+                          ? 'bg-rose-500 text-white animate-bounce shadow'
+                          : currentTheme.isDark
+                          ? 'bg-slate-800/90 text-white border border-slate-700 shadow-xs'
+                          : 'bg-white/90 text-slate-900 border border-slate-200 shadow-xs'
+                      }`}
+                    >
+                      {remainingSeconds}s
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  className={`w-full h-2 sm:h-2.5 ${
+                    currentTheme.isDark ? 'bg-slate-800/90' : 'bg-slate-200/80'
+                  } rounded-full overflow-hidden p-0.5 shadow-inner`}
+                >
+                  <div
+                    className={`h-full rounded-full transition-all duration-75 ease-linear ${
+                      remainingSeconds <= 2
+                        ? 'bg-rose-500 animate-pulse'
+                        : remainingSeconds <= 4
+                        ? 'bg-amber-500'
+                        : 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                    }`}
+                    style={{ width: `${timerPercentage}%` }}
+                  />
+                </div>
+
+                {playMode === 'MULTIPLAYER' && (
+                  <div
+                    className={`mt-1.5 px-2.5 sm:px-3 py-1.5 ${
+                      currentTheme.isDark
+                        ? 'bg-slate-900/95 border-slate-700 text-white'
+                        : 'bg-white/90 border-amber-200 text-slate-800'
+                    } backdrop-blur-xs rounded-xl border flex items-center justify-between gap-2 text-xs overflow-x-auto shadow-xs`}
+                  >
+                    <span
+                      className={`text-[11px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1 ${
+                        currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
+                      }`}
+                    >
+                      <Trophy className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Live Room:</span>
+                    </span>
+                    <div className="flex items-center gap-3 shrink-0">
+                      {liveMultiplayerLeaderboard.slice(0, 5).map((p, idx) => (
+                        <span
+                          key={p.id}
+                          className={`flex items-center gap-1 font-bold ${
+                            currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'
+                          }`}
+                        >
+                          <span className="text-amber-500 font-mono">#{idx + 1}</span>
+                          <span className="truncate max-w-[80px] sm:max-w-[110px]">{p.name}</span>
+                          <span className="font-mono text-xs opacity-60">({p.score})</span>
+                          {p.hasAnsweredCurrent && (
+                            <span className="text-[10px] text-emerald-500 font-black">✓</span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div
+                className={`${currentTheme.questionCardBg} ${currentTheme.questionCardBorder} rounded-2xl p-3.5 sm:p-5 border-2 shadow-lg flex flex-col items-center justify-center min-h-[100px] sm:min-h-[130px] max-h-[36dvh] lg:max-h-[42dvh] overflow-y-auto`}
+              >
+                {activeQuestion.gambar && activeQuestion.gambar.trim() !== '' && (
+                  <div className="w-full mb-2.5 flex items-center justify-center shrink-0">
+                    <img
+                      src={activeQuestion.gambar}
+                      alt={`Soal ${activeQuestion.kode}`}
+                      className="w-auto max-w-full h-auto max-h-28 sm:max-h-36 md:max-h-44 object-contain rounded-xl border border-slate-200/80 shadow-xs"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                  </div>
+                )}
+
+                <p
+                  className={`w-full text-sm sm:text-base md:text-lg font-bold leading-relaxed text-center break-words ${
+                    currentTheme.isDark ? 'text-white' : 'text-slate-900'
+                  }`}
+                >
+                  {activeQuestion.pertanyaan}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0 pt-1 pb-1 select-none">
+                {activeQuestion.options.map((option, idx) => {
+                  const isSelected = selectedOption === option;
+                  const isCorrect = option === activeQuestion.correctAnswerText;
+
+                  const kahootConfigs = [
+                    {
+                      symbol: '▲',
+                      baseBg: 'bg-rose-500 hover:bg-rose-400 border-rose-700 text-white',
+                      symbolBg: 'bg-rose-700/60 text-white',
+                    },
+                    {
+                      symbol: '◆',
+                      baseBg: 'bg-sky-500 hover:bg-sky-400 border-sky-700 text-white',
+                      symbolBg: 'bg-sky-700/60 text-white',
+                    },
+                    {
+                      symbol: '●',
+                      baseBg:
+                        'bg-amber-400 hover:bg-amber-300 border-amber-600 text-amber-950 font-bold',
+                      symbolBg: 'bg-amber-600/40 text-amber-950',
+                    },
+                    {
+                      symbol: '■',
+                      baseBg: 'bg-emerald-500 hover:bg-emerald-400 border-emerald-700 text-white',
+                      symbolBg: 'bg-emerald-700/60 text-white',
+                    },
+                  ];
+
+                  const cfg = kahootConfigs[idx % 4];
+                  let buttonClass = cfg.baseBg;
+                  let animClass = '';
+
+                  if (isAnswerLocked) {
+                    if (isCorrect) {
+                      buttonClass =
+                        'bg-emerald-500 border-emerald-700 text-white ring-4 ring-emerald-300';
+                      animClass = 'animate-pop';
+                    } else if (isSelected && !isCorrect) {
+                      buttonClass = 'bg-rose-600 border-rose-800 text-white ring-4 ring-rose-300';
+                      animClass = 'animate-shake';
+                    } else {
+                      buttonClass = 'bg-slate-300 border-slate-400 text-slate-500 opacity-40';
+                    }
+                  }
+
+                  return (
+                    <button
+                      key={`${activeQuestion.kode}_opt_${idx}`}
+                      onClick={() => handleAnswerClick(option)}
+                      disabled={isAnswerLocked}
+                      className={`btn-kahoot relative flex items-center justify-between p-2.5 sm:p-3.5 rounded-2xl border-b-[5px] shadow-md text-left transition-all min-h-[50px] sm:min-h-[64px] h-auto cursor-pointer disabled:cursor-not-allowed ${buttonClass} ${animClass}`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span
+                          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-xs sm:text-sm font-black shrink-0 shadow-inner ${cfg.symbolBg}`}
+                        >
+                          {cfg.symbol}
+                        </span>
+                        <span className="text-xs sm:text-sm font-bold leading-snug break-words whitespace-normal flex-1">
+                          {option}
+                        </span>
+                      </div>
+
+                      {isAnswerLocked && (
+                        <span className="shrink-0 pl-2">
+                          {isCorrect && <Check className="w-5 h-5 text-white animate-bounce" />}
+                          {isSelected && !isCorrect && <X className="w-5 h-5 text-white" />}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : currentScreen === 'REGISTRATION' && mp.gameStatus === 'IDLE' ? (
+            /* 2. LAYAR REGISTRASI & MODE SWITCHER */
             <div
               className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-4 sm:p-6 shadow-xl border-2 ${currentTheme.cardBorder} animate-pop`}
             >
-              {/* Mode Switcher Tabs */}
               <div
                 className={`grid grid-cols-2 p-1 ${
                   currentTheme.isDark
@@ -939,12 +1124,8 @@ export default function App() {
                 )}
               </div>
             </div>
-          )}
-
-          {/* ============================================================ */}
-          {/* LAYAR 2: PILIH TOPIK (GRID RESPONSIF HP, TABLET, DESKTOP)    */}
-          {/* ============================================================ */}
-          {currentScreen === 'CHOOSE_TOPIC' && (
+          ) : currentScreen === 'CHOOSE_TOPIC' ? (
+            /* 3. LAYAR PILIH TOPIK */
             <div className="w-full max-w-3xl mx-auto flex flex-col py-1">
               <div
                 className={`flex items-center justify-between gap-2 pb-2.5 border-b ${currentTheme.headerBorder} shrink-0`}
@@ -980,7 +1161,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Grid 1 Kolom di HP kecil, 2 Kolom di Tablet & Desktop */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3.5 my-3">
                 {Object.values(BANK_SOAL).map((topic) => (
                   <button
@@ -1040,18 +1220,13 @@ export default function App() {
                 </span>
               </div>
             </div>
-          )}
-
-          {/* ============================================================ */}
-          {/* LAYAR MULTIPLAYER: LOBBY RUANG TUNGGU (MINIMAL 2 PESERTA)    */}
-          {/* ============================================================ */}
-          {playMode === 'MULTIPLAYER' && mp.gameStatus === 'LOBBY' && (
+          ) : playMode === 'MULTIPLAYER' && mp.gameStatus === 'LOBBY' ? (
+            /* 4. LOBBY MULTIPLAYER */
             <div className="w-full max-w-lg bg-white/95 backdrop-blur-md rounded-2xl p-4 sm:p-6 shadow-xl border-2 border-amber-200/90 text-center animate-pop text-slate-900">
               <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
                 {mp.topicTitle}
               </span>
 
-              {/* Room PIN Card */}
               <div className="my-3 p-3.5 sm:p-4 bg-amber-50 rounded-2xl border-2 border-dashed border-amber-300 flex flex-col items-center">
                 <span className="text-xs font-bold text-slate-500 mb-0.5">PIN ROOM BERSAMA</span>
                 <div className="flex items-center gap-2">
@@ -1076,7 +1251,6 @@ export default function App() {
                 </span>
               </div>
 
-              {/* Players List */}
               <div className="mb-4">
                 <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold text-slate-700 px-1 mb-2">
                   <span>Peserta Terhubung ({mp.players.length})</span>
@@ -1113,7 +1287,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Host Actions */}
               {mp.isHost ? (
                 <button
                   type="button"
@@ -1140,228 +1313,8 @@ export default function App() {
                 <span>Keluar dari Room</span>
               </button>
             </div>
-          )}
-
-          {/* ============================================================ */}
-          {/* LAYAR 3: KUIS (DENGAN COUNTDOWN AKTIF & OPSI FULL TEXT)      */}
-          {/* ============================================================ */}
-          {isPlaying && activeQuestion && (
-            <div className="w-full flex flex-col justify-between max-w-4xl gap-2.5 sm:gap-3">
-              {/* Header: Timer Bar, Soal Index & Live Leaderboard Ticker */}
-              <div className="w-full shrink-0">
-                <div className="flex items-center justify-between gap-2 text-xs font-bold mb-1.5 px-0.5 tabular-nums">
-                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-                    <span
-                      className={`font-mono px-2 py-0.5 rounded border shrink-0 ${
-                        currentTheme.isDark
-                          ? 'text-cyan-300 bg-slate-800/90 border-slate-700'
-                          : 'text-slate-600 bg-white/80 border-slate-200'
-                      }`}
-                    >
-                      {activeQuestion.kode}
-                    </span>
-                    <span
-                      className={`hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded truncate ${
-                        currentTheme.isDark
-                          ? 'bg-slate-800 text-amber-300'
-                          : 'bg-amber-100 text-amber-900'
-                      }`}
-                    >
-                      {currentTheme.name}
-                    </span>
-                    {playMode === 'MULTIPLAYER' && (
-                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded shrink-0">
-                        Live
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-                    <span
-                      className={`text-xs font-black px-2 sm:px-2.5 py-0.5 rounded-full border shadow-xs ${currentTheme.badgeBg} ${currentTheme.badgeBorder} ${currentTheme.badgeText}`}
-                    >
-                      {score} Poin
-                    </span>
-
-                    {/* Countdown Timer Badge */}
-                    <span
-                      className={`font-mono text-xs sm:text-sm font-black px-2 py-0.5 rounded-md transition-colors ${
-                        remainingSeconds <= 2
-                          ? 'bg-rose-500 text-white animate-bounce shadow'
-                          : currentTheme.isDark
-                          ? 'bg-slate-800/90 text-white border border-slate-700 shadow-xs'
-                          : 'bg-white/90 text-slate-900 border border-slate-200 shadow-xs'
-                      }`}
-                    >
-                      {remainingSeconds}s
-                    </span>
-                  </div>
-                </div>
-
-                {/* Shimmering Animated Timer Bar */}
-                <div
-                  className={`w-full h-2 sm:h-2.5 ${
-                    currentTheme.isDark ? 'bg-slate-800/90' : 'bg-slate-200/80'
-                  } rounded-full overflow-hidden p-0.5 shadow-inner`}
-                >
-                  <div
-                    className={`h-full rounded-full transition-all duration-75 ease-linear ${
-                      remainingSeconds <= 2
-                        ? 'bg-rose-500 animate-pulse'
-                        : remainingSeconds <= 4
-                        ? 'bg-amber-500'
-                        : 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                    }`}
-                    style={{ width: `${timerPercentage}%` }}
-                  />
-                </div>
-
-                {/* Multiplayer Temporary Live Leaderboard Ticker Bar */}
-                {playMode === 'MULTIPLAYER' && (
-                  <div
-                    className={`mt-1.5 px-2.5 sm:px-3 py-1.5 ${
-                      currentTheme.isDark
-                        ? 'bg-slate-900/95 border-slate-700 text-white'
-                        : 'bg-white/90 border-amber-200 text-slate-800'
-                    } backdrop-blur-xs rounded-xl border flex items-center justify-between gap-2 text-xs overflow-x-auto shadow-xs`}
-                  >
-                    <span
-                      className={`text-[11px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1 ${
-                        currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                      }`}
-                    >
-                      <Trophy className="w-3.5 h-3.5 text-amber-500" />
-                      <span>Live Room:</span>
-                    </span>
-                    <div className="flex items-center gap-3 shrink-0">
-                      {liveMultiplayerLeaderboard.slice(0, 5).map((p, idx) => (
-                        <span
-                          key={p.id}
-                          className={`flex items-center gap-1 font-bold ${
-                            currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'
-                          }`}
-                        >
-                          <span className="text-amber-500 font-mono">#{idx + 1}</span>
-                          <span className="truncate max-w-[80px] sm:max-w-[110px]">{p.name}</span>
-                          <span className="font-mono text-xs opacity-60">({p.score})</span>
-                          {p.hasAnsweredCurrent && (
-                            <span className="text-[10px] text-emerald-500 font-black">✓</span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Question Card */}
-              <div
-                className={`${currentTheme.questionCardBg} ${currentTheme.questionCardBorder} rounded-2xl p-3.5 sm:p-5 border-2 shadow-lg flex flex-col items-center justify-center min-h-[100px] sm:min-h-[130px] max-h-[36dvh] lg:max-h-[42dvh] overflow-y-auto`}
-              >
-                {activeQuestion.gambar && activeQuestion.gambar.trim() !== '' && (
-                  <div className="w-full mb-2.5 flex items-center justify-center shrink-0">
-                    <img
-                      src={activeQuestion.gambar}
-                      alt={`Soal ${activeQuestion.kode}`}
-                      className="w-auto max-w-full h-auto max-h-28 sm:max-h-36 md:max-h-44 object-contain rounded-xl border border-slate-200/80 shadow-xs"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                    />
-                  </div>
-                )}
-
-                <p
-                  className={`w-full text-sm sm:text-base md:text-lg font-bold leading-relaxed text-center break-words ${
-                    currentTheme.isDark ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
-                  {activeQuestion.pertanyaan}
-                </p>
-              </div>
-
-              {/* Kahoot 4 Geometric Color Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0 pt-1 pb-1 select-none">
-                {activeQuestion.options.map((option, idx) => {
-                  const isSelected = selectedOption === option;
-                  const isCorrect = option === activeQuestion.correctAnswerText;
-
-                  const kahootConfigs = [
-                    {
-                      symbol: '▲',
-                      baseBg: 'bg-rose-500 hover:bg-rose-400 border-rose-700 text-white',
-                      symbolBg: 'bg-rose-700/60 text-white',
-                    },
-                    {
-                      symbol: '◆',
-                      baseBg: 'bg-sky-500 hover:bg-sky-400 border-sky-700 text-white',
-                      symbolBg: 'bg-sky-700/60 text-white',
-                    },
-                    {
-                      symbol: '●',
-                      baseBg:
-                        'bg-amber-400 hover:bg-amber-300 border-amber-600 text-amber-950 font-bold',
-                      symbolBg: 'bg-amber-600/40 text-amber-950',
-                    },
-                    {
-                      symbol: '■',
-                      baseBg: 'bg-emerald-500 hover:bg-emerald-400 border-emerald-700 text-white',
-                      symbolBg: 'bg-emerald-700/60 text-white',
-                    },
-                  ];
-
-                  const cfg = kahootConfigs[idx % 4];
-                  let buttonClass = cfg.baseBg;
-                  let animClass = '';
-
-                  if (isAnswerLocked) {
-                    if (isCorrect) {
-                      buttonClass =
-                        'bg-emerald-500 border-emerald-700 text-white ring-4 ring-emerald-300';
-                      animClass = 'animate-pop';
-                    } else if (isSelected && !isCorrect) {
-                      buttonClass = 'bg-rose-600 border-rose-800 text-white ring-4 ring-rose-300';
-                      animClass = 'animate-shake';
-                    } else {
-                      buttonClass = 'bg-slate-300 border-slate-400 text-slate-500 opacity-40';
-                    }
-                  }
-
-                  return (
-                    <button
-                      key={`${activeQuestion.kode}_opt_${idx}`}
-                      onClick={() => handleAnswerClick(option)}
-                      disabled={isAnswerLocked}
-                      className={`btn-kahoot relative flex items-center justify-between p-2.5 sm:p-3.5 rounded-2xl border-b-[5px] shadow-md text-left transition-all min-h-[50px] sm:min-h-[64px] h-auto cursor-pointer disabled:cursor-not-allowed ${buttonClass} ${animClass}`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <span
-                          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-xs sm:text-sm font-black shrink-0 shadow-inner ${cfg.symbolBg}`}
-                        >
-                          {cfg.symbol}
-                        </span>
-                        <span className="text-xs sm:text-sm font-bold leading-snug break-words whitespace-normal flex-1">
-                          {option}
-                        </span>
-                      </div>
-
-                      {isAnswerLocked && (
-                        <span className="shrink-0 pl-2">
-                          {isCorrect && <Check className="w-5 h-5 text-white animate-bounce" />}
-                          {isSelected && !isCorrect && <X className="w-5 h-5 text-white" />}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ============================================================ */}
-          {/* LAYAR 4A: HASIL KUIS SOLO (TANPA TIMER OTOMATIS KEMBALI)     */}
-          {/* ============================================================ */}
-          {playMode === 'SOLO' && currentScreen === 'RESULT' && (
+          ) : playMode === 'SOLO' && currentScreen === 'RESULT' ? (
+            /* 5. HASIL KUIS SOLO */
             <div
               className={`w-full max-w-sm ${currentTheme.cardBg} rounded-2xl p-5 sm:p-7 border-2 ${currentTheme.cardBorder} text-center shadow-xl animate-pop`}
             >
@@ -1413,12 +1366,8 @@ export default function App() {
                 <span>SELESAI</span>
               </button>
             </div>
-          )}
-
-          {/* ============================================================ */}
-          {/* LAYAR 4B: PODIUM KEMENANGAN MULTIPLAYER (TEMPORARY ROOM)     */}
-          {/* ============================================================ */}
-          {playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED' && (
+          ) : playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED' ? (
+            /* 6. PODIUM KEMENANGAN MULTIPLAYER */
             <div
               className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-4 sm:p-6 border-2 ${currentTheme.cardBorder} shadow-xl animate-pop text-center`}
             >
@@ -1437,9 +1386,7 @@ export default function App() {
                 Podium Juara Quiz Inagata
               </h2>
 
-              {/* Kahoot 3-Step Podium */}
               <div className="flex items-end justify-center gap-2 sm:gap-3 mb-5 px-1 sm:px-2 h-36">
-                {/* Rank 2 (Silver) */}
                 {finalLeaderboardDisplay[1] ? (
                   <div className="flex-1 min-w-0 flex flex-col items-center">
                     <div
@@ -1476,7 +1423,6 @@ export default function App() {
                   <div className="flex-1" />
                 )}
 
-                {/* Rank 1 (Gold) */}
                 {finalLeaderboardDisplay[0] && (
                   <div className="flex-1 min-w-0 flex flex-col items-center">
                     <div className="text-xs font-bold text-amber-400 truncate w-full px-1 flex items-center justify-center gap-1">
@@ -1492,7 +1438,6 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Rank 3 (Bronze) */}
                 {finalLeaderboardDisplay[2] ? (
                   <div className="flex-1 min-w-0 flex flex-col items-center">
                     <div
@@ -1518,7 +1463,6 @@ export default function App() {
                 )}
               </div>
 
-              {/* Complete Rankings List */}
               <div
                 className={`max-h-36 overflow-y-auto space-y-1 p-2 ${
                   currentTheme.isDark
@@ -1563,7 +1507,8 @@ export default function App() {
                 <span>KEMBALI KE MENU UTAMA</span>
               </button>
             </div>
-          )}
+          ) : null}
+
         </div>
       </main>
 
