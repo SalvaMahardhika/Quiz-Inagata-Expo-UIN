@@ -56,17 +56,24 @@ type PlayMode = 'SOLO' | 'MULTIPLAYER';
 const QUESTION_DURATION_SEC = 10; // Batas waktu 10 detik per soal
 
 export default function App() {
-  // Flag apakah peserta sudah secara spesifik memilih tema manual lewat modal
-  const hasUserSelectedThemeManually = useRef(false);
-
   // Visual Theme (Oasis, Atlantis, Tundra, Galaxy, Jungle, Mountain)
+  // Diacak hanya sekali saat perangkat pertama kali mengakses web, lalu disimpan di localStorage
   const [themeId, setThemeId] = useState<ThemeId>(() => {
-    return getRandomTheme();
+    try {
+      const saved = localStorage.getItem('QUIZ_INAGATA_THEME') as ThemeId | null;
+      if (saved && THEMES[saved]) {
+        return saved;
+      }
+    } catch {}
+    const initialRandom = getRandomTheme();
+    try {
+      localStorage.setItem('QUIZ_INAGATA_THEME', initialRandom);
+    } catch {}
+    return initialRandom;
   });
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
 
   const handleSelectTheme = (newTheme: ThemeId) => {
-    hasUserSelectedThemeManually.current = true;
     setThemeId(newTheme);
     try {
       localStorage.setItem('QUIZ_INAGATA_THEME', newTheme);
@@ -337,18 +344,12 @@ export default function App() {
     e.preventDefault();
     playClickSound();
     if (!validateForm()) return;
-    if (!hasUserSelectedThemeManually.current) {
-      setThemeId(getRandomTheme());
-    }
     setCurrentScreen('CHOOSE_TOPIC');
   };
 
   const handleCreateRoom = (topicId: number) => {
     playClickSound();
     if (!validateForm()) return;
-    if (!hasUserSelectedThemeManually.current) {
-      setThemeId(getRandomTheme());
-    }
     setCachedMultiplayerRoster([]);
     mp.createRoom(name.trim(), institution.trim(), topicId);
   };
@@ -360,9 +361,6 @@ export default function App() {
     if (!joinPinInput.trim() || joinPinInput.trim().length !== 4) {
       setFormError('Masukkan 4 digit PIN Room.');
       return;
-    }
-    if (!hasUserSelectedThemeManually.current) {
-      setThemeId(getRandomTheme());
     }
     setCachedMultiplayerRoster([]);
     mp.joinRoom(joinPinInput.trim(), name.trim(), institution.trim());
@@ -429,9 +427,6 @@ export default function App() {
     setSelectedOption(null);
     setIsAnswerLocked(false);
     setJoinPinInput('');
-    if (!hasUserSelectedThemeManually.current) {
-      setThemeId(getRandomTheme());
-    }
     setCurrentScreen('REGISTRATION');
   };
 
