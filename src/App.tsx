@@ -144,12 +144,25 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // Handler khusus saat game multiplayer mulai: randomize soal secara lokal agar tiap peserta berbeda urutannya
+  // Handler khusus saat game multiplayer mulai: randomize soal dengan aman (menghindari blank screen)
   useEffect(() => {
-    if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'PLAYING' && mp.questions.length > 0) {
-      // Ambil soal mentah dari room atau bank soal, lalu acak secara unik untuk klien ini
-      const preparedLocal = prepareTeacherQuiz(mp.questions);
-      setRandomizedMpQuestions(preparedLocal);
+    if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'PLAYING') {
+      try {
+        if (Array.isArray(mp.questions) && mp.questions.length > 0) {
+          const preparedLocal = prepareTeacherQuiz(mp.questions);
+          if (Array.isArray(preparedLocal) && preparedLocal.length > 0) {
+            setRandomizedMpQuestions(preparedLocal);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Gagal randomize soal multiplayer:', err);
+      }
+      
+      // Fallback aman jika mp.questions kosong/gagal di-random agar tidak blank
+      if (Array.isArray(mp.questions) && mp.questions.length > 0) {
+        setRandomizedMpQuestions(mp.questions as any);
+      }
     }
   }, [playMode, mp.gameStatus, mp.questions]);
 
@@ -272,15 +285,19 @@ export default function App() {
     }
   };
 
-  // Determine current active question (menggunakan randomizedMpQuestions untuk multiplayer agar soal & opsi teracak berbeda tiap peserta)
+  // Determine current active question dengan aman dari error undefined/blank
   const currentQIndex = playMode === 'MULTIPLAYER' ? mp.currentQuestionIndex : soloQuestionIndex;
+  
   const currentQuestions =
     playMode === 'MULTIPLAYER'
       ? randomizedMpQuestions.length > 0
         ? randomizedMpQuestions
-        : mp.questions
+        : mp.questions && mp.questions.length > 0
+        ? mp.questions
+        : []
       : soloQuestions;
-  const activeQuestion = currentQuestions[currentQIndex];
+
+  const activeQuestion = currentQuestions[currentQIndex] || null;
   const isPlaying = playMode === 'MULTIPLAYER' ? mp.gameStatus === 'PLAYING' : currentScreen === 'QUIZ';
 
   // Solo next question helper
@@ -884,7 +901,7 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0 pt-1 pb-1 select-none">
-                {activeQuestion.options.map((option, idx) => {
+                {activeQuestion.options && activeQuestion.options.map((option, idx) => {
                   const isSelected = selectedOption === option;
                   const isCorrect = option === activeQuestion.correctAnswerText;
 
@@ -957,6 +974,12 @@ export default function App() {
                   );
                 })}
               </div>
+            </div>
+          ) : playMode === 'MULTIPLAYER' && mp.gameStatus === 'PLAYING' && !activeQuestion ? (
+            /* Fallback aman jika state multiplayer sedang loading soal */
+            <div className="w-full max-w-md bg-white/90 backdrop-blur-md rounded-2xl p-6 shadow-xl text-center">
+              <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-xs font-bold text-slate-700">Memuat soal multiplayer...</p>
             </div>
           ) : playMode === 'MULTIPLAYER' && mp.gameStatus === 'LOBBY' ? (
             /* 2. LOBBY MULTIPLAYER (PRIORITAS SETELAH PEMILIHAN TOPIK ROOM HOST) */
@@ -1581,7 +1604,7 @@ export default function App() {
 
       {/* Modals */}
       <LeaderboardModal isOpen={isLeaderboardOpen} onClose={() => setIsLeaderboardOpen(false)} />
-      <AdminModal isOpen={isAdminModalOpen} onClose={() => setIsAdminModalOpen(false)} />
+      <AdminModal isOpen={isAdminModalInfoOpen => setIsAdminModalOpen(isOpen => !isOpen)} onClose={() => setIsAdminModalOpen(false)} />
       <ThemeSelectorModal
         isOpen={isThemeModalOpen}
         onClose={() => setIsThemeModalOpen(false)}
