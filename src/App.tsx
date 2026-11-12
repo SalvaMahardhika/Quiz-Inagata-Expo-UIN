@@ -97,6 +97,9 @@ export default function App() {
   const hasLoggedMpFinishRef = useRef(false);
   const hasLoggedSoloFinishRef = useRef(false);
 
+  // State untuk menyimpan soal multiplayer yang sudah di-random secara unik di klien ini
+  const [randomizedMpQuestions, setRandomizedMpQuestions] = useState<PreparedTeacherQuestion[]>([]);
+
   // Navigation
   const [currentScreen, setCurrentScreen] = useState<ScreenState>('REGISTRATION');
 
@@ -140,6 +143,15 @@ export default function App() {
     document.addEventListener('fullscreenchange', handleFsChange);
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
+
+  // Handler khusus saat game multiplayer mulai: randomize soal secara lokal agar tiap peserta berbeda urutannya
+  useEffect(() => {
+    if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'PLAYING' && mp.questions.length > 0) {
+      // Ambil soal mentah dari room atau bank soal, lalu acak secara unik untuk klien ini
+      const preparedLocal = prepareTeacherQuiz(mp.questions);
+      setRandomizedMpQuestions(preparedLocal);
+    }
+  }, [playMode, mp.gameStatus, mp.questions]);
 
   // ============================================================
   // REALTIME LOGGING KE GOOGLE SPREADSHEET (HANYA SAAT SELESAI)
@@ -203,7 +215,7 @@ export default function App() {
     [name, institution, phone]
   );
 
-  // Sinkronisasi roster multiplayer agar user yang logout saat PLAYING/FINISHED tidak hilang
+  // Sinkronisasi roster multiplayer & pastikan skor user lokal tersinkron dengan akurat saat FINISHED
   useEffect(() => {
     if (playMode !== 'MULTIPLAYER') return;
 
@@ -219,6 +231,7 @@ export default function App() {
       return;
     }
 
+    // Gabungkan data pemain, pastikan skor lokal yang terkumpul tidak tertimpa 0 jika server terlambat mengirim update
     const incomingList =
       mp.gameStatus === 'FINISHED' && mp.finalLeaderboard && mp.finalLeaderboard.length > 0
         ? mp.finalLeaderboard
@@ -228,11 +241,19 @@ export default function App() {
       setCachedMultiplayerRoster((prev) => {
         const mergedMap = new Map<string, MultiPlayerItem>();
         prev.forEach((p) => mergedMap.set(p.id, p));
-        incomingList.forEach((p) => mergedMap.set(p.id, p));
+        incomingList.forEach((p) => {
+          const existing = mergedMap.get(p.id);
+          // Jika p.id adalah user ini sendiri, pastikan skor lokal dipertahankan jika lebih tinggi/terbaru
+          if (existing && p.name.trim() === name.trim() && score > p.score) {
+            mergedMap.set(p.id, { ...p, score });
+          } else {
+            mergedMap.set(p.id, p);
+          }
+        });
         return Array.from(mergedMap.values()).sort((a, b) => b.score - a.score);
       });
     }
-  }, [playMode, mp.gameStatus, mp.players, mp.finalLeaderboard]);
+  }, [playMode, mp.gameStatus, mp.players, mp.finalLeaderboard, score, name]);
 
   const handleToggleFullscreen = () => {
     playClickSound();
@@ -251,9 +272,14 @@ export default function App() {
     }
   };
 
-  // Determine current active question
+  // Determine current active question (menggunakan randomizedMpQuestions untuk multiplayer agar soal & opsi teracak berbeda tiap peserta)
   const currentQIndex = playMode === 'MULTIPLAYER' ? mp.currentQuestionIndex : soloQuestionIndex;
-  const currentQuestions = playMode === 'MULTIPLAYER' ? mp.questions : soloQuestions;
+  const currentQuestions =
+    playMode === 'MULTIPLAYER'
+      ? randomizedMpQuestions.length > 0
+        ? randomizedMpQuestions
+        : mp.questions
+      : soloQuestions;
   const activeQuestion = currentQuestions[currentQIndex];
   const isPlaying = playMode === 'MULTIPLAYER' ? mp.gameStatus === 'PLAYING' : currentScreen === 'QUIZ';
 
@@ -398,8 +424,8 @@ export default function App() {
         const myRosterEntry =
           cachedMultiplayerRoster.find((p) => p.name === name.trim()) ||
           mp.players.find((p) => p.name === name.trim());
-        const finalMpScore = myRosterEntry ? myRosterEntry.score : score;
-        const totalQ = mp.questions.length || 10;
+        const finalMpScore = myRosterEntry ? Math.max(myRosterEntry.score, score) : score;
+        const totalQ = currentQuestions.length || 10;
 
         sendResultToSpreadsheet({
           mode: mp.isHost ? 'Bermain Bersama (Host)' : 'Bermain Bersama (Peserta)',
@@ -428,7 +454,7 @@ export default function App() {
     mp.topicTitle,
     mp.roomCode,
     mp.players,
-    mp.questions.length,
+    currentQuestions.length,
     cachedMultiplayerRoster,
     name,
     score,
@@ -508,20 +534,22 @@ export default function App() {
 
     const isCorrect = optionText === activeQuestion.correctAnswerText;
 
+    let updatedScore = score;
+    let updatedCorrect = correctAnswersCount;
+
     if (isCorrect) {
       playCorrectSound();
-      setScore((prev) => prev + 10);
-      setCorrectAnswersCount((prev) => prev + 1);
+      updatedScore = score + 10;
+      updatedCorrect = correctAnswersCount + 1;
+      setScore(updatedScore);
+      setCorrectAnswersCount(updatedCorrect);
     } else {
       playWrongSound();
     }
 
     if (playMode === 'SOLO') {
       setTimeout(() => {
-        moveToNextSoloQuestion(
-          isCorrect ? score + 10 : score,
-          isCorrect ? correctAnswersCount + 1 : correctAnswersCount
-        );
+        moveToNextSoloQuestion(updatedScore, updatedCorrect);
       }, 1000);
     } else {
       mp.submitAnswer(currentQIndex, optionText, timeTaken);
@@ -542,6 +570,7 @@ export default function App() {
     setPhone('');
     setSelectedTopic(null);
     setSoloQuestions([]);
+    setRandomizedMpQuestions([]);
     setSoloQuestionIndex(0);
     setScore(0);
     setCorrectAnswersCount(0);
@@ -567,12 +596,39 @@ export default function App() {
   const liveMultiplayerLeaderboard =
     cachedMultiplayerRoster.length > 0 ? cachedMultiplayerRoster : mp.players;
 
-  const finalLeaderboardDisplay =
-    cachedMultiplayerRoster.length > 0
-      ? cachedMultiplayerRoster
-      : mp.finalLeaderboard && mp.finalLeaderboard.length > 0
-      ? mp.finalLeaderboard
-      : mp.players;
+  // Pastikan user lokal selalu dimasukkan dengan skor terkininya ke dalam tampilan leaderboard akhir desktop
+  const finalLeaderboardDisplay = (() => {
+    const rawList =
+      cachedMultiplayerRoster.length > 0
+        ? cachedMultiplayerRoster
+        : mp.finalLeaderboard && mp.finalLeaderboard.length > 0
+        ? mp.finalLeaderboard
+        : mp.players;
+
+    if (!name.trim()) return rawList;
+
+    const existingIndex = rawList.findIndex((p) => p.name.trim() === name.trim());
+    if (existingIndex >= 0) {
+      const copy = [...rawList];
+      if (score > copy[existingIndex].score) {
+        copy[existingIndex] = { ...copy[existingIndex], score };
+      }
+      return copy.sort((a, b) => b.score - a.score);
+    } else if (score > 0 || mp.gameStatus === 'FINISHED') {
+      return [
+        {
+          id: 'local_current_user',
+          name: name.trim(),
+          institution: institution.trim() || '-',
+          score,
+          hasAnsweredCurrent: true,
+        },
+        ...rawList,
+      ].sort((a, b) => b.score - a.score);
+    }
+
+    return rawList;
+  })();
 
   return (
     <div
@@ -789,7 +845,9 @@ export default function App() {
                         >
                           <span className="text-amber-500 font-mono">#{idx + 1}</span>
                           <span className="truncate max-w-[80px] sm:max-w-[110px]">{p.name}</span>
-                          <span className="font-mono text-xs opacity-60">({p.score})</span>
+                          <span className="font-mono text-xs opacity-60">
+                            ({p.name.trim() === name.trim() ? score : p.score})
+                          </span>
                           {p.hasAnsweredCurrent && (
                             <span className="text-[10px] text-emerald-500 font-black">✓</span>
                           )}
@@ -1493,7 +1551,7 @@ export default function App() {
                       </span>
                     </div>
                     <span className="font-mono font-black text-amber-500 tabular-nums shrink-0">
-                      {p.score} pt
+                      {p.name.trim() === name.trim() ? Math.max(p.score, score) : p.score} pt
                     </span>
                   </div>
                 ))}
