@@ -8,6 +8,7 @@ export interface MultiPlayerItem {
   score: number;
   correctCount: number;
   hasAnsweredCurrent: boolean;
+  isDisconnected?: boolean;
 }
 
 export function useMultiplayer() {
@@ -66,8 +67,8 @@ export function useMultiplayer() {
           }
 
           case 'PLAYERS_UPDATED': {
-            // Jika permainan sudah selesai (FINISHED), jangan kurangi daftar podium!
-            if (gameStatusRef.current !== 'FINISHED') {
+            // Jika permainan sudah berjalan atau selesai, jangan kurangi daftar peserta!
+            if (gameStatusRef.current === 'LOBBY') {
               setPlayers(payload.players || []);
             }
             break;
@@ -85,14 +86,18 @@ export function useMultiplayer() {
           }
 
           case 'LIVE_LEADERBOARD': {
-            setPlayers(payload.leaderboard || []);
+            if (payload.leaderboard && payload.leaderboard.length > 0) {
+              setPlayers(payload.leaderboard);
+            }
             setAllAnswered(!!payload.allAnswered);
             break;
           }
 
           case 'NEXT_QUESTION': {
             setCurrentQuestionIndex(payload.questionIndex);
-            setPlayers(payload.leaderboard || []);
+            if (payload.leaderboard && payload.leaderboard.length > 0) {
+              setPlayers(payload.leaderboard);
+            }
             setAllAnswered(false);
             break;
           }
@@ -100,7 +105,9 @@ export function useMultiplayer() {
           case 'GAME_OVER': {
             const finalBoard = payload.finalLeaderboard || [];
             setFinalLeaderboard(finalBoard);
-            setPlayers(finalBoard);
+            if (finalBoard.length > 0) {
+              setPlayers(finalBoard);
+            }
             setGameStatus('FINISHED');
             break;
           }

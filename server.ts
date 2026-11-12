@@ -32,6 +32,7 @@ export interface RoomPlayer {
   correctCount: number;
   hasAnsweredCurrent: boolean;
   lastAnswerCorrect: boolean | null;
+  isDisconnected?: boolean;
   ws?: WebSocket;
 }
 
@@ -50,6 +51,7 @@ export interface LeaderboardEntry {
   score: number;
   correctCount: number;
   hasAnsweredCurrent: boolean;
+  isDisconnected?: boolean;
 }
 
 export interface QuizRoom {
@@ -90,7 +92,7 @@ function generateRoomCode(): string {
 function broadcastToRoom(room: QuizRoom, message: object) {
   const data = JSON.stringify(message);
   for (const player of room.players.values()) {
-    if (player.ws && player.ws.readyState === WebSocket.OPEN) {
+    if (!player.isDisconnected && player.ws && player.ws.readyState === WebSocket.OPEN) {
       player.ws.send(data);
     }
   }
@@ -105,6 +107,7 @@ function getLeaderboard(room: QuizRoom): LeaderboardEntry[] {
       score: p.score,
       correctCount: p.correctCount,
       hasAnsweredCurrent: p.hasAnsweredCurrent,
+      isDisconnected: !!p.isDisconnected,
     }))
     .sort((a, b) => b.score - a.score);
 }
@@ -131,7 +134,7 @@ function advanceRoomQuestion(room: QuizRoom) {
       },
     });
 
-    // Fallback safety timeout jika ada peserta yang koneksinya putus (13 detik)
+    // Fallback safety timeout jika ada peserta yang koneksinya terganggu (13 detik)
     room.questionTimer = setTimeout(() => {
       advanceRoomQuestion(room);
     }, 13000);
@@ -146,6 +149,69 @@ function advanceRoomQuestion(room: QuizRoom) {
         finalLeaderboard: room.finalLeaderboard,
       },
     });
+  }
+}
+
+function handlePlayerDisconnectOrLeave(roomCode: string, playerId: string) {
+  const room = rooms.get(roomCode);
+  if (!room) return;
+
+  const player = room.players.get(playerId);
+  if (!player) return;
+
+  if (room.status === 'LOBBY') {
+    // Jika masih di LOBBY, hapus pemain dari daftar tunggu
+    room.players.delete(playerId);
+    if (room.players.size === 0) {
+      if (room.questionTimer) clearTimeout(room.questionTimer);
+      rooms.delete(roomCode);
+      return;
+    }
+    if (room.hostId === playerId) {
+      const nextHost = room.players.keys().next().value;
+      if (nextHost) room.hostId = nextHost;
+    }
+    broadcastToRoom(room, {
+      type: 'PLAYERS_UPDATED',
+      payload: { players: getLeaderboard(room) },
+    });
+  } else {
+    // Jika status PLAYING atau FINISHED:
+    // JANGAN hapus pemain dari room.players agar nama & skor tetap tampil di layar peserta lain!
+    player.isDisconnected = true;
+    player.ws = undefined;
+
+    const activePlayers = Array.from(room.players.values()).filter((p) => !p.isDisconnected);
+
+    // Jika semua peserta sudah keluar/disconnect, baru bersihkan room dari memori
+    if (activePlayers.length === 0) {
+      if (room.questionTimer) clearTimeout(room.questionTimer);
+      rooms.delete(roomCode);
+      return;
+    }
+
+    if (room.hostId === playerId) {
+      room.hostId = activePlayers[0].id;
+    }
+
+    if (room.status === 'PLAYING') {
+      const allActiveHaveAnswered = activePlayers.every((p) => p.hasAnsweredCurrent);
+      broadcastToRoom(room, {
+        type: 'LIVE_LEADERBOARD',
+        payload: {
+          leaderboard: getLeaderboard(room),
+          allAnswered: allActiveHaveAnswered,
+        },
+      });
+
+      // Jika seluruh peserta yang masih bertahan sudah menjawab, langsung lanjut ke soal berikutnya
+      if (allActiveHaveAnswered) {
+        if (room.questionTimer) clearTimeout(room.questionTimer);
+        room.questionTimer = setTimeout(() => {
+          advanceRoomQuestion(room);
+        }, 1200);
+      }
+    }
   }
 }
 
@@ -188,6 +254,7 @@ wss.on('connection', (ws: WebSocket) => {
             correctCount: 0,
             hasAnsweredCurrent: false,
             lastAnswerCorrect: null,
+            isDisconnected: false,
             ws,
           };
 
@@ -248,6 +315,7 @@ wss.on('connection', (ws: WebSocket) => {
             correctCount: 0,
             hasAnsweredCurrent: false,
             lastAnswerCorrect: null,
+            isDisconnected: false,
             ws,
           };
 
@@ -346,9 +414,11 @@ wss.on('connection', (ws: WebSocket) => {
             player.correctCount += 1;
           }
 
-          const allHaveAnswered = Array.from(room.players.values()).every((p) => p.hasAnsweredCurrent);
+          // Cek apakah seluruh peserta yang masih aktif sudah menjawab
+          const activePlayers = Array.from(room.players.values()).filter((p) => !p.isDisconnected);
+          const allHaveAnswered = activePlayers.every((p) => p.hasAnsweredCurrent);
 
-          // Siarkan live leaderboard terupdate
+          // Siarkan live leaderboard terupdate (termasuk peserta yang sudah logout)
           broadcastToRoom(room, {
             type: 'LIVE_LEADERBOARD',
             payload: {
@@ -357,7 +427,7 @@ wss.on('connection', (ws: WebSocket) => {
             },
           });
 
-          // Jika semua pemain sudah menjawab, percepat pindah ke soal berikutnya dalam 1.2 detik!
+          // Jika semua pemain aktif sudah menjawab, percepat pindah ke soal berikutnya dalam 1.2 detik!
           if (allHaveAnswered) {
             if (room.questionTimer) clearTimeout(room.questionTimer);
             room.questionTimer = setTimeout(() => {
@@ -378,27 +448,7 @@ wss.on('connection', (ws: WebSocket) => {
 
         case 'LEAVE_ROOM': {
           if (currentRoomCode && currentPlayerId) {
-            const room = rooms.get(currentRoomCode);
-            if (room) {
-              // Jika status masih LOBBY atau PLAYING, hapus dari pemain aktif
-              // Tapi jika sudah FINISHED, jangan hapus dari finalLeaderboard!
-              if (room.status !== 'FINISHED') {
-                room.players.delete(currentPlayerId);
-                if (room.players.size === 0) {
-                  if (room.questionTimer) clearTimeout(room.questionTimer);
-                  rooms.delete(currentRoomCode);
-                } else {
-                  if (room.hostId === currentPlayerId) {
-                    const nextHost = room.players.keys().next().value;
-                    if (nextHost) room.hostId = nextHost;
-                  }
-                  broadcastToRoom(room, {
-                    type: 'PLAYERS_UPDATED',
-                    payload: { players: getLeaderboard(room) },
-                  });
-                }
-              }
-            }
+            handlePlayerDisconnectOrLeave(currentRoomCode, currentPlayerId);
           }
           currentPlayerId = null;
           currentRoomCode = null;
@@ -412,23 +462,7 @@ wss.on('connection', (ws: WebSocket) => {
 
   ws.on('close', () => {
     if (currentRoomCode && currentPlayerId) {
-      const room = rooms.get(currentRoomCode);
-      if (room && room.status !== 'FINISHED') {
-        room.players.delete(currentPlayerId);
-        if (room.players.size === 0) {
-          if (room.questionTimer) clearTimeout(room.questionTimer);
-          rooms.delete(currentRoomCode);
-        } else {
-          if (room.hostId === currentPlayerId) {
-            const nextHost = room.players.keys().next().value;
-            if (nextHost) room.hostId = nextHost;
-          }
-          broadcastToRoom(room, {
-            type: 'PLAYERS_UPDATED',
-            payload: { players: getLeaderboard(room) },
-          });
-        }
-      }
+      handlePlayerDisconnectOrLeave(currentRoomCode, currentPlayerId);
     }
   });
 });
