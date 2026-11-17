@@ -3,649 +3,38 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import confetti from 'canvas-confetti';
-import {
-  BANK_SOAL,
-  TopicPackage,
-  GOOGLE_SCRIPT_URL,
-} from './data/bankSoal';
-import {
-  prepareTeacherQuiz,
-  PreparedTeacherQuestion,
-} from './utils/shuffle';
-import {
-  playCorrectSound,
-  playWrongSound,
-  playClickSound,
-  playFanfareSound,
-  playTickSound,
-  getIsMuted,
-  toggleMuted,
-} from './utils/audio';
-import {
-  saveTeacherQuizRecord,
-} from './utils/storage';
-import { useMultiplayer, MultiPlayerItem } from './utils/useMultiplayer';
-import { LeaderboardModal } from './components/LeaderboardModal';
-import { AdminModal } from './components/AdminModal';
-import { THEMES, ThemeId, getRandomTheme } from './types/theme';
+import React, { useState } from 'react';
+import { useThemePreference } from './hooks/useThemePreference';
+import { useAudioFullscreen } from './hooks/useAudioFullscreen';
+import { useQuizSession } from './hooks/useQuizSession';
 import { ThemeBackdrop } from './components/themes/ThemeBackdrop';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
-import {
-  Volume2,
-  VolumeX,
-  Maximize2,
-  Minimize2,
-  ArrowLeft,
-  Check,
-  X,
-  Trophy,
-  Users,
-  User,
-  Crown,
-  Play,
-  LogOut,
-  Copy,
-  CheckCheck,
-  Palette,
-} from 'lucide-react';
-
-type ScreenState = 'REGISTRATION' | 'CHOOSE_TOPIC' | 'QUIZ' | 'RESULT';
-type PlayMode = 'SOLO' | 'MULTIPLAYER';
-
-const QUESTION_DURATION_SEC = 10; // Batas waktu 10 detik per soal
+import { LeaderboardModal } from './components/modals/LeaderboardModal';
+import { AdminModal } from './components/modals/AdminModal';
+import { TopBar } from './components/layout/TopBar';
+import { FooterBar } from './components/layout/FooterBar';
+import { RegistrationScreen } from './components/screens/RegistrationScreen';
+import { TopicSelectionScreen } from './components/screens/TopicSelectionScreen';
+import { MultiplayerLobbyScreen } from './components/screens/MultiplayerLobbyScreen';
+import { QuizPlayScreen } from './components/screens/QuizPlayScreen';
+import { ResultScreen } from './components/screens/ResultScreen';
 
 export default function App() {
-  // Visual Theme (Oasis, Atlantis, Tundra, Galaxy, Jungle, Mountain)
-  // Diacak hanya sekali saat perangkat pertama kali mengakses web, lalu disimpan di localStorage
-  const [themeId, setThemeId] = useState<ThemeId>(() => {
-    try {
-      const saved = localStorage.getItem('QUIZ_INAGATA_THEME') as ThemeId | null;
-      if (saved && THEMES[saved]) {
-        return saved;
-      }
-    } catch {}
-    const initialRandom = getRandomTheme();
-    try {
-      localStorage.setItem('QUIZ_INAGATA_THEME', initialRandom);
-    } catch {}
-    return initialRandom;
-  });
-  const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
+  const {
+    themeId,
+    currentTheme,
+    isThemeModalOpen,
+    setIsThemeModalOpen,
+    selectTheme,
+  } = useThemePreference();
 
-  const handleSelectTheme = (newTheme: ThemeId) => {
-    setThemeId(newTheme);
-    try {
-      localStorage.setItem('QUIZ_INAGATA_THEME', newTheme);
-    } catch {}
-  };
+  const { isMuted, isFullscreen, toggleMute, toggleFullscreen } = useAudioFullscreen();
+  const quiz = useQuizSession();
 
-  const currentTheme = THEMES[themeId] || THEMES.desert;
-
-  // Mode Permainan
-  const [playMode, setPlayMode] = useState<PlayMode>('SOLO');
-  const [multiplayerAction, setMultiplayerAction] = useState<'CREATE' | 'JOIN'>('CREATE');
-  const [joinPinInput, setJoinPinInput] = useState('');
-  const [copiedPin, setCopiedPin] = useState(false);
-
-  // Hook Multiplayer Real-Time WebSocket
-  const mp = useMultiplayer();
-
-  // Cache daftar peserta multiplayer agar nama/skor user yang logout tetap bertahan di layar peserta lain
-  const [cachedMultiplayerRoster, setCachedMultiplayerRoster] = useState<MultiPlayerItem[]>([]);
-  const hasLoggedMpFinishRef = useRef(false);
-  const hasLoggedSoloFinishRef = useRef(false);
-
-  // State untuk menyimpan soal multiplayer yang sudah di-random secara unik di klien ini
-  const [randomizedMpQuestions, setRandomizedMpQuestions] = useState<PreparedTeacherQuestion[]>([]);
-
-  // Navigation
-  const [currentScreen, setCurrentScreen] = useState<ScreenState>('REGISTRATION');
-
-  // Form Registrasi
-  const [name, setName] = useState('');
-  const [institution, setInstitution] = useState('');
-  const [phone, setPhone] = useState('');
-  const [formError, setFormError] = useState('');
-
-  // Topik Terpilih & Soal Solo
-  const [selectedTopic, setSelectedTopic] = useState<TopicPackage | null>(null);
-  const [soloQuestions, setSoloQuestions] = useState<PreparedTeacherQuestion[]>([]);
-  const [soloQuestionIndex, setSoloQuestionIndex] = useState(0);
-
-  // Status Kuis & Jawaban Peserta
-  const [selectedOption, setSelectedOption] = useState<string | null>(null);
-  const [isAnswerLocked, setIsAnswerLocked] = useState(false);
-  const isAnswerLockedRef = useRef(false);
-
-  const [score, setScore] = useState(0);
-  const [correctAnswersCount, setCorrectAnswersCount] = useState(0);
-
-  // Timer 10 Detik Per Peserta
-  const [timeRemainingMs, setTimeRemainingMs] = useState(QUESTION_DURATION_SEC * 1000);
-  const questionStartTimeRef = useRef<number>(Date.now());
-
-  // Modals & Kontrol
   const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
-  const [isMuted, setIsMutedState] = useState(getIsMuted());
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  useEffect(() => {
-    setIsMutedState(getIsMuted());
-  }, []);
-
-  useEffect(() => {
-    const handleFsChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFsChange);
-    return () => document.removeEventListener('fullscreenchange', handleFsChange);
-  }, []);
-
-  // Handler khusus saat game multiplayer mulai: randomize soal dengan aman (menghindari blank screen)
-  useEffect(() => {
-    if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'PLAYING') {
-      try {
-        if (Array.isArray(mp.questions) && mp.questions.length > 0) {
-          const preparedLocal = prepareTeacherQuiz(mp.questions);
-          if (Array.isArray(preparedLocal) && preparedLocal.length > 0) {
-            setRandomizedMpQuestions(preparedLocal);
-            return;
-          }
-        }
-      } catch (err) {
-        console.error('Gagal randomize soal multiplayer:', err);
-      }
-      
-      // Fallback aman jika mp.questions kosong/gagal di-random agar tidak blank
-      if (Array.isArray(mp.questions) && mp.questions.length > 0) {
-        setRandomizedMpQuestions(mp.questions as any);
-      }
-    }
-  }, [playMode, mp.gameStatus, mp.questions]);
-
-  // ============================================================
-  // REALTIME LOGGING KE GOOGLE SPREADSHEET (HANYA SAAT SELESAI)
-  // ============================================================
-  const sendResultToSpreadsheet = useCallback(
-    (payloadData: {
-      mode: string;
-      topic: string;
-      score: number;
-      correct: number;
-      totalQuestions: number;
-      detail: string;
-    }) => {
-      if (!GOOGLE_SCRIPT_URL || !GOOGLE_SCRIPT_URL.trim()) return;
-
-      try {
-        const cleanName = name.trim() || '-';
-        const cleanInstitution = institution.trim() || '-';
-        const cleanPhone = phone.trim() || '-';
-        const nowWib = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Jakarta' });
-
-        const fullPayload: Record<string, string> = {
-          action: 'RESULT',
-          timestamp: nowWib,
-          waktu: nowWib,
-          status: 'Selesai',
-          name: cleanName,
-          nama: cleanName,
-          institution: cleanInstitution,
-          instansi: cleanInstitution,
-          phone: cleanPhone,
-          whatsapp: cleanPhone,
-          no_wa: cleanPhone,
-          mode: payloadData.mode,
-          mode_permainan: payloadData.mode,
-          topic: payloadData.topic,
-          topik: payloadData.topic,
-          score: String(payloadData.score),
-          skor: String(payloadData.score),
-          correct: String(payloadData.correct),
-          benar: String(payloadData.correct),
-          jawaban_benar: String(payloadData.correct),
-          totalQuestions: String(payloadData.totalQuestions),
-          total_soal: String(payloadData.totalQuestions),
-          detail: payloadData.detail,
-        };
-
-        const formBody = new URLSearchParams(fullPayload).toString();
-
-        fetch(GOOGLE_SCRIPT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          keepalive: true,
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-          },
-          body: formBody,
-        }).catch(() => {});
-      } catch {}
-    },
-    [name, institution, phone]
-  );
-
-  // Sinkronisasi roster multiplayer & pastikan skor user lokal tersinkron dengan akurat saat FINISHED
-  useEffect(() => {
-    if (playMode !== 'MULTIPLAYER') return;
-
-    if (mp.gameStatus === 'IDLE') {
-      setCachedMultiplayerRoster([]);
-      hasLoggedMpFinishRef.current = false;
-      return;
-    }
-
-    if (mp.gameStatus === 'LOBBY') {
-      setCachedMultiplayerRoster(mp.players);
-      hasLoggedMpFinishRef.current = false;
-      return;
-    }
-
-    // Gabungkan data pemain, pastikan skor lokal yang terkumpul tidak tertimpa 0 jika server terlambat mengirim update
-    const incomingList =
-      mp.gameStatus === 'FINISHED' && mp.finalLeaderboard && mp.finalLeaderboard.length > 0
-        ? mp.finalLeaderboard
-        : mp.players;
-
-    if (incomingList.length > 0) {
-      setCachedMultiplayerRoster((prev) => {
-        const mergedMap = new Map<string, MultiPlayerItem>();
-        prev.forEach((p) => mergedMap.set(p.id, p));
-        incomingList.forEach((p) => {
-          const existing = mergedMap.get(p.id);
-          // Jika p.id adalah user ini sendiri, pastikan skor lokal dipertahankan jika lebih tinggi/terbaru
-          if (existing && p.name.trim() === name.trim() && score > p.score) {
-            mergedMap.set(p.id, { ...p, score });
-          } else {
-            mergedMap.set(p.id, p);
-          }
-        });
-        return Array.from(mergedMap.values()).sort((a, b) => b.score - a.score);
-      });
-    }
-  }, [playMode, mp.gameStatus, mp.players, mp.finalLeaderboard, score, name]);
-
-  const handleToggleFullscreen = () => {
-    playClickSound();
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-    } else {
-      document.exitFullscreen().catch(() => {});
-    }
-  };
-
-  const handleToggleMute = () => {
-    const next = toggleMuted();
-    setIsMutedState(next);
-    if (!next) {
-      playClickSound();
-    }
-  };
-
-  // Determine current active question dengan aman dari error undefined/blank
-  const currentQIndex = playMode === 'MULTIPLAYER' ? mp.currentQuestionIndex : soloQuestionIndex;
-  
-  const currentQuestions =
-    playMode === 'MULTIPLAYER'
-      ? randomizedMpQuestions.length > 0
-        ? randomizedMpQuestions
-        : mp.questions && mp.questions.length > 0
-        ? mp.questions
-        : []
-      : soloQuestions;
-
-  const activeQuestion = currentQuestions[currentQIndex] || null;
-  const isPlaying = playMode === 'MULTIPLAYER' ? mp.gameStatus === 'PLAYING' : currentScreen === 'QUIZ';
-
-  // Solo next question helper
-  const moveToNextSoloQuestion = useCallback(
-    (latestScore = score, latestCorrect = correctAnswersCount) => {
-      const nextIndex = soloQuestionIndex + 1;
-      if (nextIndex < soloQuestions.length) {
-        setSoloQuestionIndex(nextIndex);
-        setSelectedOption(null);
-        setIsAnswerLocked(false);
-        isAnswerLockedRef.current = false;
-      } else {
-        if (hasLoggedSoloFinishRef.current) return;
-        hasLoggedSoloFinishRef.current = true;
-
-        const topicFullName = selectedTopic
-          ? `${selectedTopic.nama}: ${selectedTopic.judul}`
-          : '-';
-
-        if (selectedTopic) {
-          saveTeacherQuizRecord({
-            name: name.trim(),
-            institution: institution.trim(),
-            phone: phone.trim(),
-            topicId: selectedTopic.id,
-            topicName: topicFullName,
-            score: latestScore,
-            totalQuestions: soloQuestions.length,
-            correctCount: latestCorrect,
-            timedOutCount: soloQuestions.length - latestCorrect,
-          });
-        }
-
-        sendResultToSpreadsheet({
-          mode: 'Mode Solo',
-          topic: topicFullName,
-          score: latestScore,
-          correct: latestCorrect,
-          totalQuestions: soloQuestions.length,
-          detail: `Selesai Solo (${latestCorrect}/${soloQuestions.length} benar)`,
-        });
-
-        setCurrentScreen('RESULT');
-      }
-    },
-    [
-      soloQuestionIndex,
-      soloQuestions.length,
-      selectedTopic,
-      name,
-      institution,
-      phone,
-      score,
-      correctAnswersCount,
-      sendResultToSpreadsheet,
-    ]
-  );
-
-  const handleTimeOutRef = useRef<() => void>(() => {});
-  useEffect(() => {
-    handleTimeOutRef.current = () => {
-      if (isAnswerLockedRef.current) return;
-      isAnswerLockedRef.current = true;
-      setIsAnswerLocked(true);
-      playWrongSound();
-
-      if (playMode === 'SOLO') {
-        setTimeout(() => {
-          moveToNextSoloQuestion();
-        }, 1000);
-      } else {
-        mp.submitAnswer(currentQIndex, '', QUESTION_DURATION_SEC * 1000);
-      }
-    };
-  }, [playMode, moveToNextSoloQuestion, mp, currentQIndex]);
-
-  // Countdown Timer
-  useEffect(() => {
-    if (!isPlaying || !activeQuestion) {
-      setTimeRemainingMs(QUESTION_DURATION_SEC * 1000);
-      return;
-    }
-
-    setSelectedOption(null);
-    setIsAnswerLocked(false);
-    isAnswerLockedRef.current = false;
-    setTimeRemainingMs(QUESTION_DURATION_SEC * 1000);
-    questionStartTimeRef.current = Date.now();
-
-    const totalMs = QUESTION_DURATION_SEC * 1000;
-    const startTime = Date.now();
-    let lastTick = QUESTION_DURATION_SEC;
-
-    const interval = setInterval(() => {
-      if (isAnswerLockedRef.current) {
-        clearInterval(interval);
-        return;
-      }
-
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, totalMs - elapsed);
-      setTimeRemainingMs(remaining);
-
-      const currentSec = Math.ceil(remaining / 1000);
-      if (currentSec <= 2 && currentSec > 0 && currentSec !== lastTick) {
-        lastTick = currentSec;
-        playTickSound();
-      }
-
-      if (remaining <= 0) {
-        clearInterval(interval);
-        handleTimeOutRef.current();
-      }
-    }, 50);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, [isPlaying, currentQIndex, activeQuestion?.kode]);
-
-  // Confetti & fanfare Solo result
-  useEffect(() => {
-    if (playMode === 'SOLO' && currentScreen === 'RESULT') {
-      try {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ['#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#8b5cf6'],
-        });
-      } catch {}
-      playFanfareSound();
-    }
-  }, [currentScreen, playMode]);
-
-  // Confetti & Spreadsheet logging Multiplayer finish
-  useEffect(() => {
-    if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED') {
-      if (!hasLoggedMpFinishRef.current) {
-        hasLoggedMpFinishRef.current = true;
-        const myRosterEntry =
-          cachedMultiplayerRoster.find((p) => p.name === name.trim()) ||
-          mp.players.find((p) => p.name === name.trim());
-        const finalMpScore = myRosterEntry ? Math.max(myRosterEntry.score, score) : score;
-        const totalQ = currentQuestions.length || 10;
-
-        sendResultToSpreadsheet({
-          mode: mp.isHost ? 'Bermain Bersama (Host)' : 'Bermain Bersama (Peserta)',
-          topic: mp.topicTitle || '-',
-          score: finalMpScore,
-          correct: correctAnswersCount,
-          totalQuestions: totalQ,
-          detail: `Selesai Room PIN ${mp.roomCode || '-'} (${correctAnswersCount}/${totalQ} benar)`,
-        });
-      }
-
-      try {
-        confetti({
-          particleCount: 100,
-          spread: 80,
-          origin: { y: 0.5 },
-          colors: ['#f59e0b', '#10b981', '#06b6d4', '#ef4444', '#8b5cf6'],
-        });
-      } catch {}
-      playFanfareSound();
-    }
-  }, [
-    playMode,
-    mp.gameStatus,
-    mp.isHost,
-    mp.topicTitle,
-    mp.roomCode,
-    mp.players,
-    currentQuestions.length,
-    cachedMultiplayerRoster,
-    name,
-    score,
-    correctAnswersCount,
-    sendResultToSpreadsheet,
-  ]);
-
-  const validateForm = () => {
-    if (!name.trim()) {
-      setFormError('Nama lengkap wajib diisi.');
-      return false;
-    }
-    if (!institution.trim()) {
-      setFormError('Asal instansi / sekolah wajib diisi.');
-      return false;
-    }
-    if (!phone.trim()) {
-      setFormError('Nomor WhatsApp wajib diisi.');
-      return false;
-    }
-    setFormError('');
-    return true;
-  };
-
-  const handleStartSolo = (e: React.FormEvent) => {
-    e.preventDefault();
-    playClickSound();
-    if (!validateForm()) return;
-    setCurrentScreen('CHOOSE_TOPIC');
-  };
-
-  const handleCreateRoom = (topicId: number) => {
-    playClickSound();
-    if (!validateForm()) return;
-    setCachedMultiplayerRoster([]);
-    hasLoggedMpFinishRef.current = false;
-    mp.createRoom(name.trim(), institution.trim(), topicId);
-  };
-
-  const handleJoinRoom = (e: React.FormEvent) => {
-    e.preventDefault();
-    playClickSound();
-    if (!validateForm()) return;
-    if (!joinPinInput.trim() || joinPinInput.trim().length !== 4) {
-      setFormError('Masukkan 4 digit PIN Room.');
-      return;
-    }
-    setCachedMultiplayerRoster([]);
-    hasLoggedMpFinishRef.current = false;
-    mp.joinRoom(joinPinInput.trim(), name.trim(), institution.trim());
-  };
-
-  const handleSelectSoloTopic = (topic: TopicPackage) => {
-    playClickSound();
-    setSelectedTopic(topic);
-    hasLoggedSoloFinishRef.current = false;
-
-    const prepared = prepareTeacherQuiz(topic.soal);
-    setSoloQuestions(prepared);
-    setSoloQuestionIndex(0);
-    setScore(0);
-    setCorrectAnswersCount(0);
-    setSelectedOption(null);
-    setIsAnswerLocked(false);
-    isAnswerLockedRef.current = false;
-
-    setCurrentScreen('QUIZ');
-  };
-
-  const handleAnswerClick = (optionText: string) => {
-    if (isAnswerLocked || isAnswerLockedRef.current || !activeQuestion) return;
-
-    const timeTaken = Date.now() - questionStartTimeRef.current;
-    isAnswerLockedRef.current = true;
-    setIsAnswerLocked(true);
-    setSelectedOption(optionText);
-
-    const isCorrect = optionText === activeQuestion.correctAnswerText;
-
-    let updatedScore = score;
-    let updatedCorrect = correctAnswersCount;
-
-    if (isCorrect) {
-      playCorrectSound();
-      updatedScore = score + 10;
-      updatedCorrect = correctAnswersCount + 1;
-      setScore(updatedScore);
-      setCorrectAnswersCount(updatedCorrect);
-    } else {
-      playWrongSound();
-    }
-
-    if (playMode === 'SOLO') {
-      setTimeout(() => {
-        moveToNextSoloQuestion(updatedScore, updatedCorrect);
-      }, 1000);
-    } else {
-      mp.submitAnswer(currentQIndex, optionText, timeTaken);
-    }
-  };
-
-  const handleResetToHome = () => {
-    playClickSound();
-    isAnswerLockedRef.current = false;
-    hasLoggedSoloFinishRef.current = false;
-    hasLoggedMpFinishRef.current = false;
-    if (playMode === 'MULTIPLAYER') {
-      mp.leaveRoom();
-      setCachedMultiplayerRoster([]);
-    }
-    setName('');
-    setInstitution('');
-    setPhone('');
-    setSelectedTopic(null);
-    setSoloQuestions([]);
-    setRandomizedMpQuestions([]);
-    setSoloQuestionIndex(0);
-    setScore(0);
-    setCorrectAnswersCount(0);
-    setSelectedOption(null);
-    setIsAnswerLocked(false);
-    setJoinPinInput('');
-    setCurrentScreen('REGISTRATION');
-  };
-
-  const handleCopyPin = (code: string) => {
-    playClickSound();
-    navigator.clipboard?.writeText(code);
-    setCopiedPin(true);
-    setTimeout(() => setCopiedPin(false), 2000);
-  };
-
-  const remainingSeconds = Math.ceil(timeRemainingMs / 1000);
-  const timerPercentage = Math.max(
-    0,
-    Math.min(100, (timeRemainingMs / (QUESTION_DURATION_SEC * 1000)) * 100)
-  );
-
-  const liveMultiplayerLeaderboard =
-    cachedMultiplayerRoster.length > 0 ? cachedMultiplayerRoster : mp.players;
-
-  // Pastikan user lokal selalu dimasukkan dengan skor terkininya ke dalam tampilan leaderboard akhir desktop
-  const finalLeaderboardDisplay = (() => {
-    const rawList =
-      cachedMultiplayerRoster.length > 0
-        ? cachedMultiplayerRoster
-        : mp.finalLeaderboard && mp.finalLeaderboard.length > 0
-        ? mp.finalLeaderboard
-        : mp.players;
-
-    if (!name.trim()) return rawList;
-
-    const existingIndex = rawList.findIndex((p) => p.name.trim() === name.trim());
-    if (existingIndex >= 0) {
-      const copy = [...rawList];
-      if (score > copy[existingIndex].score) {
-        copy[existingIndex] = { ...copy[existingIndex], score };
-      }
-      return copy.sort((a, b) => b.score - a.score);
-    } else if (score > 0 || mp.gameStatus === 'FINISHED') {
-      return [
-        {
-          id: 'local_current_user',
-          name: name.trim(),
-          institution: institution.trim() || '-',
-          score,
-          hasAnsweredCurrent: true,
-        },
-        ...rawList,
-      ].sort((a, b) => b.score - a.score);
-    }
-
-    return rawList;
-  })();
+  const showHomeActions = quiz.currentScreen === 'REGISTRATION' && quiz.mp.gameStatus === 'IDLE';
 
   return (
     <div
@@ -653,963 +42,141 @@ export default function App() {
         currentTheme.isDark ? 'text-white' : 'text-slate-900'
       } transition-colors duration-300`}
     >
-      {/* Dynamic Animated Backdrop */}
       <ThemeBackdrop themeId={themeId} />
 
-      {/* Top Bar */}
-      <header
-        className={`relative z-20 w-full px-3 sm:px-5 py-2 sm:py-2.5 flex items-center justify-between gap-2 border-b ${currentTheme.headerBorder} ${currentTheme.headerBg} shrink-0 shadow-xs transition-colors duration-300 select-none`}
-      >
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-          <span
-            className={`text-sm sm:text-lg font-extrabold tracking-tight truncate ${
-              currentTheme.isDark ? 'text-white' : 'text-slate-900'
-            }`}
-          >
-            Quiz Inagata
-          </span>
+      <TopBar
+        theme={currentTheme}
+        playMode={quiz.playMode}
+        roomCode={quiz.mp.roomCode}
+        isPlaying={quiz.isPlaying}
+        currentQIndex={quiz.currentQIndex}
+        totalQuestions={quiz.currentQuestions.length}
+        showHomeActions={showHomeActions}
+        isMuted={isMuted}
+        isFullscreen={isFullscreen}
+        onOpenThemeModal={() => setIsThemeModalOpen(true)}
+        onOpenLeaderboardModal={() => setIsLeaderboardOpen(true)}
+        onOpenAdminModal={() => setIsAdminModalOpen(true)}
+        onToggleMute={toggleMute}
+        onToggleFullscreen={toggleFullscreen}
+      />
 
-          {playMode === 'MULTIPLAYER' && mp.roomCode && (
-            <div
-              className={`flex items-center gap-1 text-[11px] sm:text-xs font-bold ${currentTheme.badgeBg} ${currentTheme.badgeText} px-2 py-0.5 sm:py-1 rounded-lg border ${currentTheme.badgeBorder} shrink-0`}
-            >
-              <Users className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span>PIN: {mp.roomCode}</span>
-            </div>
-          )}
-        </div>
-
-        {isPlaying ? (
-          <div
-            className={`px-2 sm:px-3 py-0.5 sm:py-1 ${currentTheme.badgeBg} border ${currentTheme.badgeBorder} rounded-full text-[11px] sm:text-xs font-bold ${currentTheme.badgeText} tabular-nums shadow-xs shrink-0`}
-          >
-            {currentQIndex + 1} / {currentQuestions.length}
-          </div>
-        ) : (
-          <div className="hidden sm:block" />
-        )}
-
-        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          <button
-            onClick={() => {
-              playClickSound();
-              setIsThemeModalOpen(true);
-            }}
-            className={`btn-kahoot px-2 sm:px-2.5 py-1.5 text-xs font-bold rounded-lg border-b-2 shadow-xs transition-all flex items-center gap-1.5 cursor-pointer ${
-              currentTheme.isDark
-                ? 'text-white bg-slate-800/90 hover:bg-slate-700 border-slate-600'
-                : 'text-amber-950 bg-amber-100 hover:bg-amber-200 border-amber-300'
-            }`}
-            title="Ganti Tema"
-          >
-            <Palette className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-            <span className="hidden md:inline">Tema: {currentTheme.name}</span>
-          </button>
-
-          {currentScreen === 'REGISTRATION' && mp.gameStatus === 'IDLE' && (
-            <>
-              {playMode === 'SOLO' && (
-                <button
-                  onClick={() => {
-                    playClickSound();
-                    setIsLeaderboardOpen(true);
-                  }}
-                  className="btn-kahoot px-2 sm:px-3 py-1.5 text-xs font-bold text-amber-950 bg-amber-200 hover:bg-amber-300 border-b-2 border-amber-400 rounded-lg shadow-xs transition-all flex items-center gap-1 sm:gap-1.5 cursor-pointer"
-                  title="Papan Skor"
-                >
-                  <Trophy className="w-3.5 h-3.5 text-amber-800 shrink-0" />
-                  <span className="hidden sm:inline">Papan Skor</span>
-                </button>
-              )}
-              <button
-                onClick={() => {
-                  playClickSound();
-                  setIsAdminModalOpen(true);
-                }}
-                className="btn-kahoot px-2 sm:px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border-b-2 border-slate-300 rounded-lg shadow-xs transition-all cursor-pointer"
-              >
-                Admin
-              </button>
-            </>
-          )}
-
-          <button
-            onClick={handleToggleMute}
-            className="p-1.5 text-slate-700 bg-white/80 hover:bg-white border border-slate-200 rounded-lg shadow-xs transition-colors cursor-pointer"
-            aria-label={isMuted ? 'Nyalakan suara' : 'Bisukan suara'}
-          >
-            {isMuted ? (
-              <VolumeX className="w-4 h-4 text-rose-600" />
-            ) : (
-              <Volume2 className="w-4 h-4 text-slate-700" />
-            )}
-          </button>
-
-          <button
-            onClick={handleToggleFullscreen}
-            className="hidden sm:inline-flex p-1.5 text-slate-700 bg-white/80 hover:bg-white border border-slate-200 rounded-lg shadow-xs transition-colors cursor-pointer"
-            aria-label={isFullscreen ? 'Keluar layar penuh' : 'Layar penuh'}
-          >
-            {isFullscreen ? (
-              <Minimize2 className="w-4 h-4" />
-            ) : (
-              <Maximize2 className="w-4 h-4" />
-            )}
-          </button>
-        </div>
-      </header>
-
-      {/* Main Viewport Container */}
       <main className="relative z-10 flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y px-3 sm:px-6 md:px-8 py-4 sm:py-6">
         <div className="min-h-full w-full max-w-4xl mx-auto flex flex-col items-center justify-center">
-          
-          {/* ============================================================ */}
-          {/* RENDER KONDISIONAL BERDASARKAN ALUR & STATUS KUIS AKTIF       */}
-          {/* ============================================================ */}
-
-          {/* 1. KUIS SEDANG BERJALAN (SOLO / MULTIPLAYER PLAYING) */}
-          {isPlaying && activeQuestion ? (
-            <div className="w-full flex flex-col justify-between max-w-4xl gap-2.5 sm:gap-3">
-              <div className="w-full shrink-0">
-                <div className="flex items-center justify-between gap-2 text-xs font-bold mb-1.5 px-0.5 tabular-nums">
-                  <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-                    <span
-                      className={`font-mono px-2 py-0.5 rounded border shrink-0 ${
-                        currentTheme.isDark
-                          ? 'text-cyan-300 bg-slate-800/90 border-slate-700'
-                          : 'text-slate-600 bg-white/80 border-slate-200'
-                      }`}
-                    >
-                      {activeQuestion.kode}
-                    </span>
-                    <span
-                      className={`hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded truncate ${
-                        currentTheme.isDark
-                          ? 'bg-slate-800 text-amber-300'
-                          : 'bg-amber-100 text-amber-900'
-                      }`}
-                    >
-                      {currentTheme.name}
-                    </span>
-                    {playMode === 'MULTIPLAYER' && (
-                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded shrink-0">
-                        Live
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-                    <span
-                      className={`text-xs font-black px-2 sm:px-2.5 py-0.5 rounded-full border shadow-xs ${currentTheme.badgeBg} ${currentTheme.badgeBorder} ${currentTheme.badgeText}`}
-                    >
-                      {score} Poin
-                    </span>
-
-                    <span
-                      className={`font-mono text-xs sm:text-sm font-black px-2 py-0.5 rounded-md transition-colors ${
-                        remainingSeconds <= 2
-                          ? 'bg-rose-500 text-white animate-bounce shadow'
-                          : currentTheme.isDark
-                          ? 'bg-slate-800/90 text-white border border-slate-700 shadow-xs'
-                          : 'bg-white/90 text-slate-900 border border-slate-200 shadow-xs'
-                      }`}
-                    >
-                      {remainingSeconds}s
-                    </span>
-                  </div>
-                </div>
-
-                <div
-                  className={`w-full h-2 sm:h-2.5 ${
-                    currentTheme.isDark ? 'bg-slate-800/90' : 'bg-slate-200/80'
-                  } rounded-full overflow-hidden p-0.5 shadow-inner`}
-                >
-                  <div
-                    className={`h-full rounded-full transition-all duration-75 ease-linear ${
-                      remainingSeconds <= 2
-                        ? 'bg-rose-500 animate-pulse'
-                        : remainingSeconds <= 4
-                        ? 'bg-amber-500'
-                        : 'bg-gradient-to-r from-emerald-500 to-teal-400'
-                    }`}
-                    style={{ width: `${timerPercentage}%` }}
-                  />
-                </div>
-
-                {playMode === 'MULTIPLAYER' && (
-                  <div
-                    className={`mt-1.5 px-2.5 sm:px-3 py-1.5 ${
-                      currentTheme.isDark
-                        ? 'bg-slate-900/95 border-slate-700 text-white'
-                        : 'bg-white/90 border-amber-200 text-slate-800'
-                    } backdrop-blur-xs rounded-xl border flex items-center justify-between gap-2 text-xs overflow-x-auto shadow-xs`}
-                  >
-                    <span
-                      className={`text-[11px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1 ${
-                        currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                      }`}
-                    >
-                      <Trophy className="w-3.5 h-3.5 text-amber-500" />
-                      <span>Live Room:</span>
-                    </span>
-                    <div className="flex items-center gap-3 shrink-0">
-                      {liveMultiplayerLeaderboard.slice(0, 5).map((p, idx) => (
-                        <span
-                          key={p.id}
-                          className={`flex items-center gap-1 font-bold ${
-                            currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'
-                          }`}
-                        >
-                          <span className="text-amber-500 font-mono">#{idx + 1}</span>
-                          <span className="truncate max-w-[80px] sm:max-w-[110px]">{p.name}</span>
-                          <span className="font-mono text-xs opacity-60">
-                            ({p.name.trim() === name.trim() ? score : p.score})
-                          </span>
-                          {p.hasAnsweredCurrent && (
-                            <span className="text-[10px] text-emerald-500 font-black">✓</span>
-                          )}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div
-                className={`${currentTheme.questionCardBg} ${currentTheme.questionCardBorder} rounded-2xl p-3.5 sm:p-5 border-2 shadow-lg flex flex-col items-center justify-center min-h-[100px] sm:min-h-[130px] max-h-[36dvh] lg:max-h-[42dvh] overflow-y-auto`}
-              >
-                {activeQuestion.gambar && activeQuestion.gambar.trim() !== '' && (
-                  <div className="w-full mb-2.5 flex items-center justify-center shrink-0">
-                    <img
-                      src={activeQuestion.gambar}
-                      alt={`Soal ${activeQuestion.kode}`}
-                      className="w-auto max-w-full h-auto max-h-28 sm:max-h-36 md:max-h-44 object-contain rounded-xl border border-slate-200/80 shadow-xs"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
-                    />
-                  </div>
-                )}
-
-                <p
-                  className={`w-full text-sm sm:text-base md:text-lg font-bold leading-relaxed text-center break-words ${
-                    currentTheme.isDark ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
-                  {activeQuestion.pertanyaan}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0 pt-1 pb-1 select-none">
-                {activeQuestion.options && activeQuestion.options.map((option, idx) => {
-                  const isSelected = selectedOption === option;
-                  const isCorrect = option === activeQuestion.correctAnswerText;
-
-                  const kahootConfigs = [
-                    {
-                      symbol: '▲',
-                      baseBg: 'bg-rose-500 hover:bg-rose-400 border-rose-700 text-white',
-                      symbolBg: 'bg-rose-700/60 text-white',
-                    },
-                    {
-                      symbol: '◆',
-                      baseBg: 'bg-sky-500 hover:bg-sky-400 border-sky-700 text-white',
-                      symbolBg: 'bg-sky-700/60 text-white',
-                    },
-                    {
-                      symbol: '●',
-                      baseBg:
-                        'bg-amber-400 hover:bg-amber-300 border-amber-600 text-amber-950 font-bold',
-                      symbolBg: 'bg-amber-600/40 text-amber-950',
-                    },
-                    {
-                      symbol: '■',
-                      baseBg: 'bg-emerald-500 hover:bg-emerald-400 border-emerald-700 text-white',
-                      symbolBg: 'bg-emerald-700/60 text-white',
-                    },
-                  ];
-
-                  const cfg = kahootConfigs[idx % 4];
-                  let buttonClass = cfg.baseBg;
-                  let animClass = '';
-
-                  if (isAnswerLocked) {
-                    if (isCorrect) {
-                      buttonClass =
-                        'bg-emerald-500 border-emerald-700 text-white ring-4 ring-emerald-300';
-                      animClass = 'animate-pop';
-                    } else if (isSelected && !isCorrect) {
-                      buttonClass = 'bg-rose-600 border-rose-800 text-white ring-4 ring-rose-300';
-                      animClass = 'animate-shake';
-                    } else {
-                      buttonClass = 'bg-slate-300 border-slate-400 text-slate-500 opacity-40';
-                    }
-                  }
-
-                  return (
-                    <button
-                      key={`${activeQuestion.kode}_opt_${idx}`}
-                      onClick={() => handleAnswerClick(option)}
-                      disabled={isAnswerLocked}
-                      className={`btn-kahoot relative flex items-center justify-between p-2.5 sm:p-3.5 rounded-2xl border-b-[5px] shadow-md text-left transition-all min-h-[50px] sm:min-h-[64px] h-auto cursor-pointer disabled:cursor-not-allowed ${buttonClass} ${animClass}`}
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <span
-                          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center text-xs sm:text-sm font-black shrink-0 shadow-inner ${cfg.symbolBg}`}
-                        >
-                          {cfg.symbol}
-                        </span>
-                        <span className="text-xs sm:text-sm font-bold leading-snug break-words whitespace-normal flex-1">
-                          {option}
-                        </span>
-                      </div>
-
-                      {isAnswerLocked && (
-                        <span className="shrink-0 pl-2">
-                          {isCorrect && <Check className="w-5 h-5 text-white animate-bounce" />}
-                          {isSelected && !isCorrect && <X className="w-5 h-5 text-white" />}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : playMode === 'MULTIPLAYER' && mp.gameStatus === 'PLAYING' && !activeQuestion ? (
-            /* Fallback aman jika state multiplayer sedang loading soal */
+          {quiz.isPlaying && quiz.activeQuestion ? (
+            <QuizPlayScreen
+              theme={currentTheme}
+              playMode={quiz.playMode}
+              question={quiz.activeQuestion}
+              score={quiz.score}
+              remainingSeconds={quiz.remainingSeconds}
+              timerPercentage={quiz.timerPercentage}
+              selectedOption={quiz.selectedOption}
+              isAnswerLocked={quiz.isAnswerLocked}
+              liveMultiplayerLeaderboard={quiz.liveMultiplayerLeaderboard}
+              currentPlayerName={quiz.name}
+              onSelectOption={quiz.handleAnswerClick}
+            />
+          ) : quiz.playMode === 'MULTIPLAYER' &&
+            quiz.mp.gameStatus === 'PLAYING' &&
+            !quiz.activeQuestion ? (
             <div className="w-full max-w-md bg-white/90 backdrop-blur-md rounded-2xl p-6 shadow-xl text-center">
               <div className="w-8 h-8 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <p className="text-xs font-bold text-slate-700">Memuat soal multiplayer...</p>
             </div>
-          ) : playMode === 'MULTIPLAYER' && mp.gameStatus === 'LOBBY' ? (
-            /* 2. LOBBY MULTIPLAYER (PRIORITAS SETELAH PEMILIHAN TOPIK ROOM HOST) */
-            <div className="w-full max-w-lg bg-white/95 backdrop-blur-md rounded-2xl p-4 sm:p-6 shadow-xl border-2 border-amber-200/90 text-center animate-pop text-slate-900">
-              <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">
-                {mp.topicTitle}
-              </span>
-
-              <div className="my-3 p-3.5 sm:p-4 bg-amber-50 rounded-2xl border-2 border-dashed border-amber-300 flex flex-col items-center">
-                <span className="text-xs font-bold text-slate-500 mb-0.5">PIN ROOM BERSAMA</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-3xl sm:text-5xl font-mono font-black tracking-widest text-slate-900">
-                    {mp.roomCode}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => mp.roomCode && handleCopyPin(mp.roomCode)}
-                    className="p-2 text-slate-500 hover:text-slate-900 hover:bg-amber-100 rounded-lg transition-colors cursor-pointer"
-                    title="Salin PIN"
-                  >
-                    {copiedPin ? (
-                      <CheckCheck className="w-5 h-5 text-emerald-600" />
-                    ) : (
-                      <Copy className="w-5 h-5" />
-                    )}
-                  </button>
-                </div>
-                <span className="text-[11px] text-slate-500 mt-1">
-                  Bagikan 4 digit PIN ini kepada peserta lain untuk bergabung
-                </span>
-              </div>
-
-              <div className="mb-4">
-                <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold text-slate-700 px-1 mb-2">
-                  <span>Peserta Terhubung ({mp.players.length})</span>
-                  <span className={mp.players.length >= 2 ? 'text-emerald-700' : 'text-amber-700'}>
-                    {mp.players.length >= 2
-                      ? '✓ Siap Bermain (Min. 2 Orang)'
-                      : 'Menunggu minimal 2 orang...'}
-                  </span>
-                </div>
-
-                <div className="max-h-40 overflow-y-auto space-y-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200">
-                  {mp.players.map((p, idx) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center justify-between gap-2 p-2.5 bg-white rounded-lg border border-slate-200 text-left"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="w-6 text-center text-xs font-mono font-bold text-slate-400 shrink-0">
-                          #{idx + 1}
-                        </span>
-                        <div className="truncate">
-                          <div className="text-xs font-bold text-slate-900 truncate flex items-center gap-1.5">
-                            <span className="truncate">{p.name}</span>
-                            {idx === 0 && <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
-                          </div>
-                          <div className="text-[10px] text-slate-400 truncate">{p.institution}</div>
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                        Tersambung
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {mp.isHost ? (
-                <button
-                  type="button"
-                  onClick={mp.startRoomGame}
-                  disabled={mp.players.length < 2}
-                  className="btn-kahoot w-full h-12 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-extrabold rounded-xl text-xs sm:text-sm border-b-4 border-emerald-800 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none"
-                >
-                  <Play className="w-4 h-4 fill-white shrink-0" />
-                  <span>MULAI KUIS BERSAMA ({mp.players.length} Peserta)</span>
-                </button>
-              ) : (
-                <div className="p-3 bg-amber-100/70 border border-amber-300 rounded-xl text-xs font-bold text-amber-950 flex items-center justify-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping shrink-0" />
-                  <span>Menunggu Host memulai kuis bersama...</span>
-                </div>
-              )}
-
-              <button
-                type="button"
-                onClick={handleResetToHome}
-                className="mt-3 text-xs font-semibold text-slate-400 hover:text-rose-600 flex items-center justify-center gap-1 mx-auto transition-colors cursor-pointer select-none"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Keluar dari Room</span>
-              </button>
-            </div>
-          ) : currentScreen === 'REGISTRATION' && mp.gameStatus === 'IDLE' ? (
-            /* 3. LAYAR REGISTRASI & MODE SWITCHER */
-            <div
-              className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-4 sm:p-6 shadow-xl border-2 ${currentTheme.cardBorder} animate-pop`}
-            >
-              <div
-                className={`grid grid-cols-2 p-1 ${
-                  currentTheme.isDark
-                    ? 'bg-slate-800/80 border-slate-700'
-                    : 'bg-amber-100/70 border-amber-200'
-                } rounded-xl mb-4 border select-none`}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    playClickSound();
-                    setPlayMode('SOLO');
-                  }}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    playMode === 'SOLO'
-                      ? currentTheme.isDark
-                        ? 'bg-slate-700 text-white shadow-xs'
-                        : 'bg-white text-slate-950 shadow-xs'
-                      : currentTheme.isDark
-                      ? 'text-slate-400 hover:text-white'
-                      : 'text-amber-900 hover:text-slate-950'
-                  }`}
-                >
-                  <User className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Mode Solo</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    playClickSound();
-                    setPlayMode('MULTIPLAYER');
-                  }}
-                  className={`py-2 px-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    playMode === 'MULTIPLAYER'
-                      ? 'bg-amber-500 text-slate-950 shadow-xs font-extrabold'
-                      : currentTheme.isDark
-                      ? 'text-slate-400 hover:text-white'
-                      : 'text-amber-900 hover:text-slate-950'
-                  }`}
-                >
-                  <Users className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">Bermain Bersama</span>
-                </button>
-              </div>
-
-              <div className="mb-3.5 sm:mb-4">
-                <h2
-                  className={`text-base sm:text-lg font-bold tracking-tight ${
-                    currentTheme.isDark ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
-                  {playMode === 'SOLO' ? 'Registrasi Peserta' : 'Bermain Bersama'}
-                </h2>
-                <p
-                  className={`text-xs mt-0.5 ${
-                    currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                  }`}
-                >
-                  {playMode === 'SOLO'
-                    ? 'Lengkapi data untuk memulai kuis (masuk Papan Skor Global)'
-                    : 'Bermain bersama di topik yang sama minimal 2 orang'}
-                </p>
-              </div>
-
-              {(formError || mp.errorMessage) && (
-                <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl font-medium animate-shake">
-                  {formError || mp.errorMessage}
-                </div>
-              )}
-
-              <div className="space-y-3">
-                <div>
-                  <label
-                    className={`block text-xs font-semibold mb-1 ${
-                      currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'
-                    }`}
-                  >
-                    Nama Lengkap
-                  </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value);
-                      if (formError) setFormError('');
-                    }}
-                    placeholder="Nama lengkap atau panggilan"
-                    className={`w-full h-10 sm:h-11 px-3.5 ${
-                      currentTheme.isDark
-                        ? 'bg-slate-800/90 border-slate-700 text-white placeholder-slate-400 focus:border-cyan-400 focus:bg-slate-800'
-                        : 'bg-slate-50 border-amber-200 text-slate-900 placeholder-slate-400 focus:border-amber-500 focus:bg-white'
-                    } border rounded-xl text-sm font-medium outline-none transition-all shadow-inner`}
-                    autoFocus
-                  />
-                </div>
-
-                <div>
-                  <label
-                    className={`block text-xs font-semibold mb-1 ${
-                      currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'
-                    }`}
-                  >
-                    Asal Instansi
-                  </label>
-                  <input
-                    type="text"
-                    value={institution}
-                    onChange={(e) => {
-                      setInstitution(e.target.value);
-                      if (formError) setFormError('');
-                    }}
-                    placeholder="Nama instansi atau organisasi"
-                    className={`w-full h-10 sm:h-11 px-3.5 ${
-                      currentTheme.isDark
-                        ? 'bg-slate-800/90 border-slate-700 text-white placeholder-slate-400 focus:border-cyan-400 focus:bg-slate-800'
-                        : 'bg-slate-50 border-amber-200 text-slate-900 placeholder-slate-400 focus:border-amber-500 focus:bg-white'
-                    } border rounded-xl text-sm font-medium outline-none transition-all shadow-inner`}
-                  />
-                </div>
-
-                <div>
-                  <label
-                    className={`block text-xs font-semibold mb-1 ${
-                      currentTheme.isDark ? 'text-slate-200' : 'text-slate-700'
-                    }`}
-                  >
-                    Nomor WhatsApp
-                  </label>
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value);
-                      if (formError) setFormError('');
-                    }}
-                    placeholder="08xxxxxxxxxx"
-                    className={`w-full h-10 sm:h-11 px-3.5 ${
-                      currentTheme.isDark
-                        ? 'bg-slate-800/90 border-slate-700 text-white placeholder-slate-400 focus:border-cyan-400 focus:bg-slate-800'
-                        : 'bg-slate-50 border-amber-200 text-slate-900 placeholder-slate-400 focus:border-amber-500 focus:bg-white'
-                    } border rounded-xl text-sm font-medium outline-none transition-all shadow-inner`}
-                  />
-                </div>
-
-                {playMode === 'SOLO' ? (
-                  <button
-                    type="button"
-                    onClick={handleStartSolo}
-                    className={`btn-kahoot w-full h-11 mt-2 ${currentTheme.primaryButtonBg} font-extrabold rounded-xl text-xs border-b-4 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none`}
-                  >
-                    <span>PILIH TOPIK</span>
-                    <span>→</span>
-                  </button>
-                ) : (
-                  <div className="pt-2 space-y-2">
-                    <div className="grid grid-cols-2 gap-2 select-none">
-                      <button
-                        type="button"
-                        onClick={() => setMultiplayerAction('CREATE')}
-                        className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                          multiplayerAction === 'CREATE'
-                            ? 'bg-amber-100 border-amber-400 text-amber-950'
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        Buat Room Baru
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMultiplayerAction('JOIN')}
-                        className={`py-2 px-2 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
-                          multiplayerAction === 'JOIN'
-                            ? 'bg-amber-100 border-amber-400 text-amber-950'
-                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                        }`}
-                      >
-                        Gabung Room
-                      </button>
-                    </div>
-
-                    {multiplayerAction === 'CREATE' ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (validateForm()) {
-                            setCurrentScreen('CHOOSE_TOPIC');
-                          }
-                        }}
-                        className="btn-kahoot w-full h-11 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-extrabold rounded-xl text-xs border-b-4 border-emerald-800 shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer select-none"
-                      >
-                        <span>PILIH TOPIK & BUAT PIN ROOM</span>
-                        <span>→</span>
-                      </button>
-                    ) : (
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          maxLength={4}
-                          value={joinPinInput}
-                          onChange={(e) => setJoinPinInput(e.target.value.replace(/\D/g, ''))}
-                          placeholder="4 Digit PIN"
-                          className="w-full sm:w-2/5 h-11 text-center font-mono text-base font-black tracking-widest bg-slate-50 text-slate-900 border-2 border-amber-200 focus:border-amber-500 rounded-xl outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleJoinRoom}
-                          className="btn-kahoot w-full sm:flex-1 h-11 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-xl text-xs border-b-4 border-amber-700 shadow-sm transition-all flex items-center justify-center gap-1 cursor-pointer select-none"
-                        >
-                          <span>GABUNG ROOM</span>
-                          <span>→</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : currentScreen === 'CHOOSE_TOPIC' ? (
-            /* 4. LAYAR PILIH TOPIK */
-            <div className="w-full max-w-3xl mx-auto flex flex-col py-1">
-              <div
-                className={`flex items-center justify-between gap-2 pb-2.5 border-b ${currentTheme.headerBorder} shrink-0`}
-              >
-                <button
-                  onClick={() => {
-                    playClickSound();
-                    setCurrentScreen('REGISTRATION');
-                  }}
-                  className={`btn-kahoot inline-flex items-center gap-1 px-2.5 py-1.5 ${
-                    currentTheme.isDark
-                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-b-2 border-slate-600'
-                      : 'bg-white/90 hover:bg-white text-slate-700 border-b-2 border-slate-300'
-                  } rounded-lg text-xs font-bold shadow-xs cursor-pointer shrink-0 select-none`}
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>Kembali</span>
-                </button>
-
-                <div
-                  className={`text-right text-[11px] sm:text-xs ${
-                    currentTheme.isDark ? 'text-slate-300' : 'text-slate-600'
-                  } truncate`}
-                >
-                  <span
-                    className={`font-bold ${
-                      currentTheme.isDark ? 'text-white' : 'text-slate-900'
-                    }`}
-                  >
-                    {name}
-                  </span>{' '}
-                  · {playMode === 'MULTIPLAYER' ? 'Buat Room Bersama' : institution}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3.5 my-3">
-                {Object.values(BANK_SOAL).map((topic) => (
-                  <button
-                    key={topic.id}
-                    onClick={() => {
-                      if (playMode === 'MULTIPLAYER') {
-                        handleCreateRoom(topic.id);
-                      } else {
-                        handleSelectSoloTopic(topic);
-                      }
-                    }}
-                    className={`btn-kahoot group p-3 sm:p-4 ${
-                      currentTheme.isDark
-                        ? 'bg-slate-900/90 hover:bg-slate-800 text-white border-slate-700 hover:border-amber-400 border-b-slate-800 hover:border-b-amber-500'
-                        : 'bg-white/95 hover:bg-amber-50/90 text-slate-900 border-amber-200/90 hover:border-amber-400 border-b-amber-300 hover:border-b-amber-500'
-                    } rounded-xl sm:rounded-2xl border-2 border-b-4 shadow-sm text-left flex flex-col justify-between min-h-[5.5rem] sm:min-h-[6.75rem] cursor-pointer transition-all select-none`}
-                  >
-                    <div className="flex items-center justify-between w-full gap-1">
-                      <span
-                        className={`w-6 h-6 sm:w-7 sm:h-7 rounded-lg ${currentTheme.badgeBg} ${currentTheme.badgeText} font-mono text-[11px] sm:text-xs font-bold flex items-center justify-center shrink-0`}
-                      >
-                        {String(topic.id).padStart(2, '0')}
-                      </span>
-                      <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-400 truncate">
-                        {topic.nama}
-                      </span>
-                    </div>
-                    <div className="mt-2">
-                      <h3
-                        className={`text-xs sm:text-base font-bold ${
-                          currentTheme.isDark ? 'text-white' : 'text-slate-900'
-                        } leading-snug line-clamp-2`}
-                      >
-                        {topic.judul}
-                      </h3>
-                      <p
-                        className={`text-[11px] sm:text-xs ${
-                          currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                        } line-clamp-2 mt-0.5 sm:mt-1`}
-                      >
-                        {topic.deskripsi}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div
-                className={`text-center text-[11px] sm:text-xs font-semibold ${
-                  currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                } pt-1 pb-2`}
-              >
-                <span>
-                  {playMode === 'MULTIPLAYER'
-                    ? 'Pilih topik untuk membuat Room Live dan mengacak 10 soal'
-                    : 'Pilih satu topik untuk memulai 10 soal acak'}
-                </span>
-              </div>
-            </div>
-          ) : playMode === 'SOLO' && currentScreen === 'RESULT' ? (
-            /* 5. HASIL KUIS SOLO */
-            <div
-              className={`w-full max-w-sm ${currentTheme.cardBg} rounded-2xl p-5 sm:p-7 border-2 ${currentTheme.cardBorder} text-center shadow-xl animate-pop`}
-            >
-              <h2
-                className={`text-lg sm:text-xl font-bold ${
-                  currentTheme.isDark ? 'text-white' : 'text-slate-900'
-                }`}
-              >
-                Hasil Kuis Solo
-              </h2>
-              <p
-                className={`text-xs ${
-                  currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                } mt-0.5 break-words`}
-              >
-                {name} · {institution}
-              </p>
-
-              <div
-                className={`my-5 p-4 ${
-                  currentTheme.isDark
-                    ? 'bg-slate-800/80 border-slate-700'
-                    : 'bg-gradient-to-b from-amber-50 to-emerald-50 border-amber-200'
-                } rounded-xl border`}
-              >
-                <div className="text-4xl sm:text-5xl font-black tabular-nums text-amber-500 tracking-tight">
-                  {score}
-                </div>
-                <div
-                  className={`text-xs font-bold ${
-                    currentTheme.isDark ? 'text-slate-300' : 'text-slate-600'
-                  } mt-1 tabular-nums`}
-                >
-                  {correctAnswersCount} dari {soloQuestions.length} soal benar
-                </div>
-                <div
-                  className={`text-[11px] mt-1.5 ${
-                    currentTheme.isDark ? 'text-emerald-400' : 'text-emerald-700'
-                  } font-semibold`}
-                >
-                  Skor tercatat di Papan Skor Global
-                </div>
-              </div>
-
-              <button
-                onClick={handleResetToHome}
-                className={`btn-kahoot w-full h-12 ${currentTheme.primaryButtonBg} font-extrabold rounded-xl text-sm border-b-4 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none`}
-              >
-                <span>SELESAI</span>
-              </button>
-            </div>
-          ) : playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED' ? (
-            /* 6. PODIUM KEMENANGAN MULTIPLAYER */
-            <div
-              className={`w-full max-w-md ${currentTheme.cardBg} rounded-2xl p-4 sm:p-6 border-2 ${currentTheme.cardBorder} shadow-xl animate-pop text-center`}
-            >
-              <span
-                className={`text-xs font-bold uppercase tracking-wider ${
-                  currentTheme.isDark ? 'text-amber-300' : 'text-amber-800'
-                }`}
-              >
-                {mp.topicTitle}
-              </span>
-              <h2
-                className={`text-lg sm:text-xl font-black ${
-                  currentTheme.isDark ? 'text-white' : 'text-slate-900'
-                } mt-1 mb-4`}
-              >
-                Podium Juara Quiz Inagata
-              </h2>
-
-              <div className="flex items-end justify-center gap-2 sm:gap-3 mb-5 px-1 sm:px-2 h-36">
-                {finalLeaderboardDisplay[1] ? (
-                  <div className="flex-1 min-w-0 flex flex-col items-center">
-                    <div
-                      className={`text-xs font-bold truncate w-full px-1 ${
-                        currentTheme.isDark ? 'text-slate-200' : 'text-slate-800'
-                      }`}
-                    >
-                      {finalLeaderboardDisplay[1].name}
-                    </div>
-                    <div
-                      className={`text-[11px] font-mono font-bold ${
-                        currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                      }`}
-                    >
-                      {finalLeaderboardDisplay[1].score} pt
-                    </div>
-                    <div
-                      className={`w-full h-20 ${
-                        currentTheme.isDark
-                          ? 'bg-slate-700 border-slate-600'
-                          : 'bg-slate-200 border-slate-300'
-                      } border-2 rounded-t-xl flex flex-col items-center justify-center shadow-xs mt-1`}
-                    >
-                      <span
-                        className={`text-sm font-black ${
-                          currentTheme.isDark ? 'text-white' : 'text-slate-700'
-                        }`}
-                      >
-                        #2
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1" />
-                )}
-
-                {finalLeaderboardDisplay[0] && (
-                  <div className="flex-1 min-w-0 flex flex-col items-center">
-                    <div className="text-xs font-bold text-amber-400 truncate w-full px-1 flex items-center justify-center gap-1">
-                      <Crown className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                      <span className="truncate">{finalLeaderboardDisplay[0].name}</span>
-                    </div>
-                    <div className="text-xs font-mono font-black text-amber-400">
-                      {finalLeaderboardDisplay[0].score} pt
-                    </div>
-                    <div className="w-full h-28 bg-gradient-to-t from-amber-400 to-yellow-300 border-2 border-amber-400 rounded-t-xl flex flex-col items-center justify-center shadow-md mt-1 text-slate-950">
-                      <span className="text-base font-black">#1</span>
-                    </div>
-                  </div>
-                )}
-
-                {finalLeaderboardDisplay[2] ? (
-                  <div className="flex-1 min-w-0 flex flex-col items-center">
-                    <div
-                      className={`text-xs font-bold truncate w-full px-1 ${
-                        currentTheme.isDark ? 'text-amber-200' : 'text-amber-900'
-                      }`}
-                    >
-                      {finalLeaderboardDisplay[2].name}
-                    </div>
-                    <div
-                      className={`text-[11px] font-mono font-bold ${
-                        currentTheme.isDark ? 'text-slate-400' : 'text-slate-500'
-                      }`}
-                    >
-                      {finalLeaderboardDisplay[2].score} pt
-                    </div>
-                    <div className="w-full h-16 bg-amber-600/30 border-2 border-amber-600/40 rounded-t-xl flex flex-col items-center justify-center shadow-xs mt-1">
-                      <span className="text-sm font-black text-amber-400">#3</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1" />
-                )}
-              </div>
-
-              <div
-                className={`max-h-36 overflow-y-auto space-y-1 p-2 ${
-                  currentTheme.isDark
-                    ? 'bg-slate-800/90 border-slate-700'
-                    : 'bg-slate-50 border-slate-200'
-                } rounded-xl border mb-4 text-left`}
-              >
-                {finalLeaderboardDisplay.map((p, idx) => (
-                  <div
-                    key={p.id}
-                    className={`flex items-center justify-between gap-2 p-2 ${
-                      currentTheme.isDark
-                        ? 'bg-slate-900 border-slate-800 text-white'
-                        : 'bg-white border-slate-200 text-slate-900'
-                    } rounded-lg border text-xs`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono font-bold text-slate-400 w-5 shrink-0">
-                        #{idx + 1}
-                      </span>
-                      <span className="font-bold truncate">{p.name}</span>
-                      <span
-                        className={`text-[11px] ${
-                          currentTheme.isDark ? 'text-slate-400' : 'text-slate-400'
-                        } truncate`}
-                      >
-                        ({p.institution})
-                      </span>
-                    </div>
-                    <span className="font-mono font-black text-amber-500 tabular-nums shrink-0">
-                      {p.name.trim() === name.trim() ? Math.max(p.score, score) : p.score} pt
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                type="button"
-                onClick={handleResetToHome}
-                className="btn-kahoot w-full h-11 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs border-b-4 border-slate-950 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none"
-              >
-                <span>KEMBALI KE MENU UTAMA</span>
-              </button>
-            </div>
+          ) : quiz.playMode === 'MULTIPLAYER' && quiz.mp.gameStatus === 'LOBBY' ? (
+            <MultiplayerLobbyScreen
+              roomCode={quiz.mp.roomCode}
+              topicTitle={quiz.mp.topicTitle}
+              players={quiz.mp.players}
+              isHost={quiz.mp.isHost}
+              copiedPin={quiz.copiedPin}
+              onCopyPin={quiz.handleCopyPin}
+              onStartGame={quiz.mp.startRoomGame}
+              onLeaveRoom={quiz.handleResetToHome}
+            />
+          ) : quiz.currentScreen === 'REGISTRATION' && quiz.mp.gameStatus === 'IDLE' ? (
+            <RegistrationScreen
+              theme={currentTheme}
+              playMode={quiz.playMode}
+              onChangePlayMode={quiz.setPlayMode}
+              multiplayerAction={quiz.multiplayerAction}
+              onChangeMultiplayerAction={quiz.setMultiplayerAction}
+              name={quiz.name}
+              onChangeName={quiz.setName}
+              institution={quiz.institution}
+              onChangeInstitution={quiz.setInstitution}
+              phone={quiz.phone}
+              onChangePhone={quiz.setPhone}
+              sessionTokenInput={quiz.sessionTokenInput}
+              onChangeSessionToken={quiz.setSessionTokenInput}
+              joinPinInput={quiz.joinPinInput}
+              onChangeJoinPin={quiz.setJoinPinInput}
+              formError={quiz.formError}
+              mpError={quiz.mp.errorMessage}
+              clearErrors={() => {
+                if (quiz.formError) quiz.setFormError('');
+                if (quiz.mp.errorMessage) quiz.mp.clearError();
+              }}
+              isCheckingToken={quiz.isCheckingToken}
+              onStartSolo={quiz.handleStartSolo}
+              onProceedCreateRoom={quiz.handleProceedCreateRoom}
+              onJoinRoom={quiz.handleJoinRoom}
+            />
+          ) : quiz.currentScreen === 'CHOOSE_TOPIC' ? (
+            <TopicSelectionScreen
+              theme={currentTheme}
+              playMode={quiz.playMode}
+              name={quiz.name}
+              institution={quiz.institution}
+              topics={quiz.liveTopics}
+              topicSource={quiz.topicSource}
+              topicWarning={quiz.topicWarning}
+              isBusy={quiz.isCheckingToken}
+              errorMessage={quiz.formError || quiz.mp.errorMessage}
+              onBack={() => {
+                quiz.mp.clearError();
+                quiz.setCurrentScreen('REGISTRATION');
+              }}
+              onSelectTopic={(topic) => {
+                if (quiz.playMode === 'MULTIPLAYER') {
+                  quiz.handleCreateRoom(topic.id);
+                } else {
+                  quiz.handleSelectSoloTopic(topic);
+                }
+              }}
+            />
+          ) : (quiz.playMode === 'SOLO' && quiz.currentScreen === 'RESULT') ||
+            (quiz.playMode === 'MULTIPLAYER' && quiz.mp.gameStatus === 'FINISHED') ? (
+            <ResultScreen
+              playMode={quiz.playMode}
+              theme={currentTheme}
+              name={quiz.name}
+              institution={quiz.institution}
+              score={quiz.score}
+              correctCount={quiz.correctAnswersCount}
+              totalQuestions={quiz.soloQuestions.length}
+              topicTitle={quiz.mp.topicTitle}
+              finalLeaderboard={quiz.finalLeaderboardDisplay}
+              onFinish={quiz.handleResetToHome}
+            />
           ) : null}
-
         </div>
       </main>
 
-      {/* Global Footer */}
-      <footer
-        className={`relative z-20 w-full px-4 py-2 border-t ${currentTheme.footerBorder} ${currentTheme.footerBg} text-center shrink-0 transition-colors duration-300 select-none`}
-      >
-        <p className={`text-xs font-semibold ${currentTheme.footerText}`}>
-          Quiz Inagata · Tema {currentTheme.name}
-        </p>
-      </footer>
+      <FooterBar theme={currentTheme} />
 
-      {/* Modals */}
       <LeaderboardModal isOpen={isLeaderboardOpen} onClose={() => setIsLeaderboardOpen(false)} />
-      <AdminModal isOpen={isAdminModalInfoOpen => setIsAdminModalOpen(isOpen => !isOpen)} onClose={() => setIsAdminModalOpen(false)} />
+      <AdminModal
+        isOpen={isAdminModalOpen}
+        onClose={() => setIsAdminModalOpen(false)}
+        onTopicsUpdated={quiz.applyUpdatedTopics}
+      />
       <ThemeSelectorModal
         isOpen={isThemeModalOpen}
         onClose={() => setIsThemeModalOpen(false)}
         currentThemeId={themeId}
-        onSelectTheme={handleSelectTheme}
+        onSelectTheme={selectTheme}
       />
     </div>
   );

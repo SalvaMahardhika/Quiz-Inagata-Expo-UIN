@@ -5,7 +5,7 @@
  * 2. Mengacak urutan 4 pilihan jawaban (A, B, C, D) pada setiap soal.
  */
 
-import { RawQuestion } from '../data/bankSoal';
+import { RawQuestion } from '../types/quiz';
 
 export function fisherYatesShuffle<T>(array: T[]): T[] {
   const result = [...array];

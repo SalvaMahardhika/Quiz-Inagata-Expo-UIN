@@ -26,12 +26,17 @@ export function useMultiplayer() {
   const [allAnswered, setAllAnswered] = useState(false);
 
   const socketRef = useRef<WebSocket | null>(null);
+  const playerIdRef = useRef<string | null>(null);
   const gameStatusRef = useRef<'IDLE' | 'LOBBY' | 'PLAYING' | 'FINISHED'>('IDLE');
 
-  // Keep ref in sync
+  // Keep refs in sync
   useEffect(() => {
     gameStatusRef.current = gameStatus;
   }, [gameStatus]);
+
+  useEffect(() => {
+    playerIdRef.current = playerId;
+  }, [playerId]);
 
   const connect = useCallback(() => {
     if (socketRef.current && (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)) {
@@ -70,6 +75,9 @@ export function useMultiplayer() {
             // Jika permainan sudah berjalan atau selesai, jangan kurangi daftar peserta!
             if (gameStatusRef.current === 'LOBBY') {
               setPlayers(payload.players || []);
+              if (payload.hostId && playerIdRef.current) {
+                setIsHost(payload.hostId === playerIdRef.current);
+              }
             }
             break;
           }
@@ -140,13 +148,17 @@ export function useMultiplayer() {
   }, []);
 
   const createRoom = useCallback(
-    (hostName: string, hostInstitution: string, topicId: number) => {
+    (hostName: string, hostInstitution: string, topicId: number, sessionToken: string) => {
       connect();
+      let attempts = 0;
       const checkAndSend = () => {
         if (socketRef.current?.readyState === WebSocket.OPEN) {
-          send('CREATE_ROOM', { hostName, hostInstitution, topicId });
-        } else {
+          send('CREATE_ROOM', { hostName, hostInstitution, topicId, sessionToken });
+        } else if (attempts < 30) {
+          attempts += 1;
           setTimeout(checkAndSend, 100);
+        } else {
+          setErrorMessage('Gagal terhubung ke server multiplayer. Silakan coba lagi.');
         }
       };
       checkAndSend();
@@ -157,11 +169,15 @@ export function useMultiplayer() {
   const joinRoom = useCallback(
     (code: string, playerName: string, playerInstitution: string) => {
       connect();
+      let attempts = 0;
       const checkAndSend = () => {
         if (socketRef.current?.readyState === WebSocket.OPEN) {
           send('JOIN_ROOM', { roomCode: code, playerName, playerInstitution });
-        } else {
+        } else if (attempts < 30) {
+          attempts += 1;
           setTimeout(checkAndSend, 100);
+        } else {
+          setErrorMessage('Gagal terhubung ke server multiplayer. Silakan coba lagi.');
         }
       };
       checkAndSend();

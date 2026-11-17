@@ -92,8 +92,8 @@ export function getTopLeaderboard(limit = 10): TeacherQuizRecord[] {
 /**
  * Ekspor semua data peserta ke format CSV (Excel Friendly dengan UTF-8 BOM)
  */
-export function exportRecordsToCSV(): boolean {
-  const records = getAllQuizRecords();
+export function exportRecordsToCSV(customRecords?: TeacherQuizRecord[]): boolean {
+  const records = customRecords ?? getAllQuizRecords();
   if (records.length === 0) {
     return false;
   }
