@@ -20,6 +20,7 @@ export interface SessionToken {
 export interface SpreadsheetConfig {
   spreadsheetUrlOrId: string;
   appsScriptUrl: string;
+  deploymentId: string;
   sheetNames: string[];
   enabled: boolean;
 }
@@ -195,6 +196,7 @@ export async function fetchSpreadsheetConfig(pin: string): Promise<SpreadsheetCo
 export interface ParticipantSheetConfig {
   spreadsheetUrl: string;
   appsScriptUrl: string;
+  deploymentId: string;
   sheetName: string;
   enabled: boolean;
 }

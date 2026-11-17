@@ -38,6 +38,27 @@ export function extractSpreadsheetId(urlOrId: string): string {
   return '';
 }
 
+export function normalizeAppsScriptUrl(urlOrDeploymentId: string): string {
+  const trimmed = (urlOrDeploymentId || '').trim();
+  if (!trimmed) return '';
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(trimmed)) {
+    return `https://script.google.com/macros/s/${trimmed}/exec`;
+  }
+  return trimmed;
+}
+
+export function extractAppsScriptDeploymentId(urlOrDeploymentId: string): string {
+  const trimmed = (urlOrDeploymentId || '').trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/\/macros\/s\/([a-zA-Z0-9_-]+)/i);
+  if (match && match[1]) return match[1];
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  return '';
+}
+
 function decodeHtmlEntities(str: string): string {
   return str
     .replace(/&amp;/g, '&')

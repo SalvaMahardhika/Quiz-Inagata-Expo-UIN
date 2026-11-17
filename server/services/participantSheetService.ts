@@ -4,17 +4,34 @@ import {
   readJsonFile,
   writeJsonFile,
 } from '../lib/jsonStore.ts';
+import {
+  extractAppsScriptDeploymentId,
+  normalizeAppsScriptUrl,
+} from '../lib/sheetParsers.ts';
 import type { ParticipantLogPayload, ParticipantSheetConfig } from '../types.ts';
 
+const initialParticipantScriptUrl = normalizeAppsScriptUrl(
+  process.env.GOOGLE_PARTICIPANT_SCRIPT_URL || GOOGLE_SCRIPT_URL || ''
+);
 let participantSheetConfig: ParticipantSheetConfig = readJsonFile<ParticipantSheetConfig>(
   PARTICIPANT_SHEET_CONFIG_FILE,
   {
     spreadsheetUrl: '',
-    appsScriptUrl: process.env.GOOGLE_PARTICIPANT_SCRIPT_URL || GOOGLE_SCRIPT_URL || '',
+    appsScriptUrl: initialParticipantScriptUrl,
+    deploymentId: extractAppsScriptDeploymentId(initialParticipantScriptUrl),
     sheetName: 'Daftar Peserta',
     enabled: true,
   }
 );
+participantSheetConfig = {
+  ...participantSheetConfig,
+  deploymentId:
+    participantSheetConfig.deploymentId ||
+    extractAppsScriptDeploymentId(participantSheetConfig.appsScriptUrl || ''),
+  appsScriptUrl: normalizeAppsScriptUrl(
+    participantSheetConfig.appsScriptUrl || participantSheetConfig.deploymentId || ''
+  ),
+};
 
 export function getParticipantSheetConfig(): ParticipantSheetConfig {
   return participantSheetConfig;
@@ -23,13 +40,20 @@ export function getParticipantSheetConfig(): ParticipantSheetConfig {
 export function updateParticipantSheetConfigState(
   input: Partial<ParticipantSheetConfig>
 ): ParticipantSheetConfig {
+  const rawUrl = String(input.appsScriptUrl ?? participantSheetConfig.appsScriptUrl ?? '').trim();
+  const rawDepId = String(input.deploymentId ?? '').trim();
+
+  const resolvedUrl = normalizeAppsScriptUrl(rawUrl || rawDepId);
+  const resolvedDepId =
+    extractAppsScriptDeploymentId(rawDepId) ||
+    extractAppsScriptDeploymentId(resolvedUrl);
+
   participantSheetConfig = {
     spreadsheetUrl: String(
       input.spreadsheetUrl ?? participantSheetConfig.spreadsheetUrl
     ).trim(),
-    appsScriptUrl: String(
-      input.appsScriptUrl ?? participantSheetConfig.appsScriptUrl
-    ).trim(),
+    appsScriptUrl: resolvedUrl,
+    deploymentId: resolvedDepId,
     sheetName: String(input.sheetName ?? participantSheetConfig.sheetName).trim() || 'Daftar Peserta',
     enabled:
       typeof input.enabled === 'boolean' ? input.enabled : participantSheetConfig.enabled,
@@ -45,9 +69,15 @@ export async function sendParticipantLogToSheet(
     return { ok: true, skipped: true };
   }
 
-  const targetUrl = (participantSheetConfig.appsScriptUrl || '').trim();
+  const targetUrl = normalizeAppsScriptUrl(
+    participantSheetConfig.appsScriptUrl || participantSheetConfig.deploymentId || ''
+  );
   if (!targetUrl) {
-    return { ok: false, skipped: true, error: 'URL Apps Script Daftar Peserta belum diisi.' };
+    return {
+      ok: false,
+      skipped: true,
+      error: 'URL Apps Script / ID Penerapan Daftar Peserta belum diisi.',
+    };
   }
 
   try {

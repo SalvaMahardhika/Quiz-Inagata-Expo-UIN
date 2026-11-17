@@ -5,9 +5,11 @@ import {
   TOPIC_ACCENTS,
   TOPIC_ICONS,
   discoverGoogleSheetTabs,
+  extractAppsScriptDeploymentId,
   extractSpreadsheetId,
   fetchSheetHtmlCellImages,
   fetchWorkbookSheetsFromExport,
+  normalizeAppsScriptUrl,
   normalizeSpreadsheetImageUrl,
   parseCorrectIndex,
   parseGvizJson,
@@ -18,15 +20,29 @@ import type { LiveQuestionsCache, SpreadsheetConfig } from '../types.ts';
 
 const CACHE_TTL_MS = 45 * 1000;
 
+const initialScriptUrl = normalizeAppsScriptUrl(
+  process.env.GOOGLE_QUESTIONS_SCRIPT_URL || ''
+);
 let spreadsheetConfig: SpreadsheetConfig = readJsonFile<SpreadsheetConfig>(
   SPREADSHEET_CONFIG_FILE,
   {
     spreadsheetUrlOrId: process.env.GOOGLE_SHEET_ID || '',
-    appsScriptUrl: process.env.GOOGLE_QUESTIONS_SCRIPT_URL || '',
+    appsScriptUrl: initialScriptUrl,
+    deploymentId: extractAppsScriptDeploymentId(initialScriptUrl),
     sheetNames: [],
     enabled: true,
   }
 );
+spreadsheetConfig = {
+  ...spreadsheetConfig,
+  deploymentId:
+    spreadsheetConfig.deploymentId ||
+    extractAppsScriptDeploymentId(spreadsheetConfig.appsScriptUrl || ''),
+  appsScriptUrl:
+    normalizeAppsScriptUrl(
+      spreadsheetConfig.appsScriptUrl || spreadsheetConfig.deploymentId || ''
+    ),
+};
 
 let liveCache: LiveQuestionsCache | null = null;
 
@@ -126,7 +142,7 @@ async function fetchFromGoogleSheetId(
 }
 
 async function fetchFromAppsScript(scriptUrl: string): Promise<TopicPackage[] | null> {
-  const cleanUrl = (scriptUrl || '').trim();
+  const cleanUrl = normalizeAppsScriptUrl(scriptUrl);
   if (!cleanUrl) return null;
 
   try {
@@ -223,11 +239,20 @@ export function getSpreadsheetConfig(): SpreadsheetConfig {
 }
 
 export function updateSpreadsheetConfigState(input: Partial<SpreadsheetConfig>): SpreadsheetConfig {
+  const rawUrl = String(input.appsScriptUrl ?? spreadsheetConfig.appsScriptUrl ?? '').trim();
+  const rawDepId = String(input.deploymentId ?? '').trim();
+
+  const resolvedUrl = normalizeAppsScriptUrl(rawUrl || rawDepId);
+  const resolvedDepId =
+    extractAppsScriptDeploymentId(rawDepId) ||
+    extractAppsScriptDeploymentId(resolvedUrl);
+
   spreadsheetConfig = {
     spreadsheetUrlOrId: String(
       input.spreadsheetUrlOrId ?? spreadsheetConfig.spreadsheetUrlOrId
     ).trim(),
-    appsScriptUrl: String(input.appsScriptUrl ?? spreadsheetConfig.appsScriptUrl).trim(),
+    appsScriptUrl: resolvedUrl,
+    deploymentId: resolvedDepId,
     sheetNames: [], // Selalu scan otomatis seluruh sheet dari spreadsheet
     enabled: typeof input.enabled === 'boolean' ? input.enabled : spreadsheetConfig.enabled,
   };
@@ -245,9 +270,12 @@ export async function getLiveTopics(forceRefresh = false): Promise<LiveQuestions
 
   if (spreadsheetConfig.enabled) {
     const sheetId = extractSpreadsheetId(spreadsheetConfig.spreadsheetUrlOrId);
+    const effectiveScriptUrl = normalizeAppsScriptUrl(
+      spreadsheetConfig.appsScriptUrl || spreadsheetConfig.deploymentId || ''
+    );
 
-    if (spreadsheetConfig.appsScriptUrl && spreadsheetConfig.appsScriptUrl.trim()) {
-      const fromGas = await fetchFromAppsScript(spreadsheetConfig.appsScriptUrl);
+    if (effectiveScriptUrl) {
+      const fromGas = await fetchFromAppsScript(effectiveScriptUrl);
       if (fromGas && fromGas.length > 0) {
         const recordMap: Record<number, TopicPackage> = {};
         let totalQ = 0;

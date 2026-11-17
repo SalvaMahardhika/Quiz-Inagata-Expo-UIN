@@ -127,23 +127,62 @@ export const AdminParticipantSheetTab: React.FC<AdminParticipantSheetTabProps> =
             </label>
           </div>
 
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-              URL Web App Google Apps Script Daftar Peserta (Wajib untuk auto-simpan)
-            </label>
-            <input
-              type="text"
-              value={config.appsScriptUrl}
-              onChange={(e) =>
-                onChangeConfig((prev) => ({
-                  ...prev,
-                  appsScriptUrl: e.target.value,
-                }))
-              }
-              placeholder="https://script.google.com/macros/s/.../exec"
-              className="w-full h-9 px-3 text-xs text-slate-900 bg-white border border-slate-300 rounded-lg outline-none focus:border-emerald-500"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                URL Aplikasi Web Apps Script (<code>/exec</code>)
+              </label>
+              <input
+                type="text"
+                value={config.appsScriptUrl}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const match = val.match(/\/macros\/s\/([a-zA-Z0-9_-]+)/i);
+                  onChangeConfig((prev) => ({
+                    ...prev,
+                    appsScriptUrl: val,
+                    deploymentId: match?.[1]
+                      ? match[1]
+                      : !val.trim()
+                      ? ''
+                      : prev.deploymentId,
+                  }));
+                }}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="w-full h-9 px-3 text-xs text-slate-900 bg-white border border-slate-300 rounded-lg outline-none focus:border-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                ID Penerapan (Deployment ID)
+              </label>
+              <input
+                type="text"
+                value={config.deploymentId || ''}
+                onChange={(e) => {
+                  const idVal = e.target.value;
+                  const cleanId = idVal.trim();
+                  onChangeConfig((prev) => ({
+                    ...prev,
+                    deploymentId: idVal,
+                    appsScriptUrl: /^[a-zA-Z0-9_-]{20,}$/.test(cleanId)
+                      ? `https://script.google.com/macros/s/${cleanId}/exec`
+                      : !cleanId
+                      ? ''
+                      : prev.appsScriptUrl,
+                  }));
+                }}
+                placeholder="AKfycb..."
+                className="w-full h-9 px-3 text-xs font-mono text-slate-900 bg-white border border-slate-300 rounded-lg outline-none focus:border-emerald-500"
+              />
+            </div>
           </div>
+          <p className="text-[10px] text-slate-500 -mt-1">
+            Isi salah satu saja (<strong>URL Aplikasi Web</strong> atau{' '}
+            <strong>ID Penerapan</strong>) — keduanya otomatis tersinkronisasi. URL{' '}
+            <em>Library</em> tidak perlu dipakai.
+          </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div>

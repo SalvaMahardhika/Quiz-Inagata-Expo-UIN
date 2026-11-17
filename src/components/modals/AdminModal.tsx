@@ -60,6 +60,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [sheetConfig, setSheetConfig] = useState<SpreadsheetConfig>({
     spreadsheetUrlOrId: '',
     appsScriptUrl: '',
+    deploymentId: '',
     sheetNames: [],
     enabled: true,
   });
@@ -76,6 +77,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [participantConfig, setParticipantConfig] = useState<ParticipantSheetConfig>({
     spreadsheetUrl: '',
     appsScriptUrl: '',
+    deploymentId: '',
     sheetName: 'Daftar Peserta',
     enabled: true,
   });
