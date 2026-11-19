@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { X, KeyRound, FileSpreadsheet, Trophy, Users } from 'lucide-react';
 import { exportRecordsToCSV } from '../../services/csvExportService';
 import {
@@ -52,6 +52,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
   const [tokens, setTokens] = useState<SessionToken[]>([]);
@@ -78,9 +79,15 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     spreadsheetUrl: '',
     appsScriptUrl: '',
     deploymentId: '',
-    sheetName: 'Daftar Peserta',
+    sheetName: 'Sheet1',
     enabled: true,
   });
+  const [participantTestStatus, setParticipantTestStatus] = useState<{
+    ok: boolean;
+    warning?: boolean;
+    message: string;
+    spreadsheetUrl?: string;
+  } | null>(null);
   const [isParticipantBusy, setIsParticipantBusy] = useState(false);
 
   const [totalServerRecords, setTotalServerRecords] = useState(0);
@@ -104,15 +111,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   };
 
   const flashSuccess = (msg: string) => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
     setErrorMessage('');
     setSuccessMessage(msg);
-    setTimeout(() => setSuccessMessage(''), 3500);
+    flashTimerRef.current = setTimeout(() => setSuccessMessage(''), 6000);
   };
 
   const flashError = (msg: string) => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
     setSuccessMessage('');
     setErrorMessage(msg);
-    setTimeout(() => setErrorMessage(''), 4000);
+    flashTimerRef.current = setTimeout(() => setErrorMessage(''), 8000);
   };
 
   const loadAllAdminData = useCallback(async (pin: string) => {
@@ -177,7 +186,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     try {
       const res = await generateAdminTokens(activePin, params);
       setTokens(res.tokens);
-      flashSuccess(`${res.created.length} token sesi berhasil dibuat.`);
+      flashSuccess(`${res.created.length} token dibuat.`);
     } catch (err: any) {
       flashError(err?.message || 'Gagal membuat token.');
     } finally {
@@ -200,9 +209,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     try {
       const updated = await clearAdminTokens(activePin, 'used');
       setTokens(updated);
-      flashSuccess('Token terpakai berhasil dibersihkan.');
+      flashSuccess('Token terpakai dihapus.');
     } catch (err: any) {
-      flashError(err?.message || 'Gagal membersihkan token.');
+      flashError(err?.message || 'Gagal menghapus token.');
     }
   };
 
@@ -216,11 +225,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const handleCopyAllUnused = () => {
     const unused = tokens.filter((t) => t.status === 'UNUSED').map((t) => t.code);
     if (unused.length === 0) {
-      flashError('Tidak ada token tersedia untuk disalin.');
+      flashError('Tidak ada token tersedia.');
       return;
     }
     handleCopyText(unused.join('\n'), 'ALL_UNUSED');
-    flashSuccess(`${unused.length} token tersedia disalin ke clipboard.`);
+    flashSuccess(`${unused.length} token disalin.`);
   };
 
   const handleSaveAndSyncSheet = async (e: React.FormEvent) => {
@@ -234,7 +243,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       });
       setSheetConfig(res.config);
 
-      const freshTopics = await refreshLiveTopicsAdmin(activePin);
+      const freshTopics = res.liveTopics || (await refreshLiveTopicsAdmin(activePin));
       applyLiveTopicsPreview(freshTopics);
       if (onTopicsUpdated) onTopicsUpdated(freshTopics);
 
@@ -242,11 +251,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         flashError(freshTopics.warning);
       } else {
         flashSuccess(
-          `Sinkronisasi selesai (${freshTopics.sheetTopicsCount} tipe soal, ${freshTopics.totalLiveQuestions} soal).`
+          `Tersinkron: ${freshTopics.sheetTopicsCount} topik, ${freshTopics.totalLiveQuestions} soal.`
         );
       }
     } catch (err: any) {
-      flashError(err?.message || 'Gagal menyimpan konfigurasi spreadsheet.');
+      flashError(err?.message || 'Gagal menyimpan pengaturan.');
     } finally {
       setIsSheetBusy(false);
     }
@@ -263,11 +272,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         flashError(freshTopics.warning);
       } else {
         flashSuccess(
-          `Soal diperbarui (${freshTopics.sheetTopicsCount} tipe soal, ${freshTopics.totalLiveQuestions} soal).`
+          `Diperbarui: ${freshTopics.sheetTopicsCount} topik, ${freshTopics.totalLiveQuestions} soal.`
         );
       }
     } catch (err: any) {
-      flashError(err?.message || 'Gagal menyinkronkan soal.');
+      flashError(err?.message || 'Gagal memuat ulang soal.');
     } finally {
       setIsSheetBusy(false);
     }
@@ -277,12 +286,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     e.preventDefault();
     playClickSound();
     setIsParticipantBusy(true);
+    setParticipantTestStatus(null);
     try {
       const res = await updateParticipantSheetConfig(activePin, participantConfig);
       setParticipantConfig(res.config);
-      flashSuccess('Pengaturan Spreadsheet Daftar Peserta berhasil disimpan.');
+      const msg = 'Pengaturan peserta disimpan.';
+      setParticipantTestStatus({ ok: true, message: msg });
+      flashSuccess(msg);
     } catch (err: any) {
-      flashError(err?.message || 'Gagal menyimpan pengaturan spreadsheet peserta.');
+      const msg = err?.message || 'Gagal menyimpan pengaturan.';
+      setParticipantTestStatus({ ok: false, message: msg });
+      flashError(msg);
     } finally {
       setIsParticipantBusy(false);
     }
@@ -291,16 +305,42 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const handleTestParticipantSheet = async () => {
     playClickSound();
     setIsParticipantBusy(true);
+    setParticipantTestStatus(null);
     try {
-      await updateParticipantSheetConfig(activePin, participantConfig);
+      const saved = await updateParticipantSheetConfig(activePin, participantConfig);
+      setParticipantConfig(saved.config);
       const res = await testParticipantSheetConfig(activePin);
       if (res.ok) {
-        flashSuccess('Baris contoh berhasil dikirim ke Spreadsheet Daftar Peserta!');
+        const targetTab = res.sheetName || saved.config.sheetName || 'Sheet1';
+        if (res.isLegacyResponse) {
+          const msg = `Terkirim (${
+            res.testedAt || 'baru saja'
+          }). Jika belum tampak di "${targetTab}", periksa tab bawah atau deploy ulang Code.gs sebagai Versi baru.`;
+          setParticipantTestStatus({
+            ok: true,
+            warning: true,
+            message: msg,
+            spreadsheetUrl: res.spreadsheetUrl || saved.config.spreadsheetUrl || undefined,
+          });
+          flashSuccess('Request terkirim ke Apps Script.');
+        } else {
+          const msg = `Berhasil masuk ke "${res.spreadsheetName}" (${targetTab}, baris ${res.rowNumber}).`;
+          setParticipantTestStatus({
+            ok: true,
+            message: msg,
+            spreadsheetUrl: res.spreadsheetUrl || saved.config.spreadsheetUrl || undefined,
+          });
+          flashSuccess(msg);
+        }
       } else {
-        flashError(res.error || 'Gagal mengirim baris uji coba.');
+        const msg = res.error || 'Uji kirim gagal.';
+        setParticipantTestStatus({ ok: false, message: msg });
+        flashError(msg);
       }
     } catch (err: any) {
-      flashError(err?.message || 'Gagal menguji koneksi Spreadsheet Daftar Peserta.');
+      const msg = err?.message || 'Gagal menghubungi Apps Script.';
+      setParticipantTestStatus({ ok: false, message: msg });
+      flashError(msg);
     } finally {
       setIsParticipantBusy(false);
     }
@@ -314,9 +354,9 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       setTotalServerRecords(data.totalCount);
       const success = exportRecordsToCSV(data.records);
       if (success) {
-        flashSuccess('File CSV seluruh perangkat berhasil diunduh.');
+        flashSuccess('CSV diunduh.');
       } else {
-        flashError('Belum ada data peserta di server untuk diekspor.');
+        flashError('Belum ada data.');
       }
     } catch (err: any) {
       flashError(err?.message || 'Gagal mengunduh CSV.');
@@ -332,7 +372,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       await clearAdminRecords(activePin);
       setTotalServerRecords(0);
       if (onDataChanged) onDataChanged();
-      flashSuccess('Seluruh data Papan Skor Global telah dihapus.');
+      flashSuccess('Papan skor direset.');
     } catch (err: any) {
       flashError(err?.message || 'Gagal mereset data.');
     } finally {
@@ -362,13 +402,8 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50/60">
           <div>
             <h3 className="text-sm sm:text-base font-bold text-slate-900">
-              {isAuthenticated ? 'Panel Admin Quiz Inagata' : 'Akses Admin'}
+              {isAuthenticated ? 'Panel Admin' : 'Masuk Admin'}
             </h3>
-            {isAuthenticated && (
-              <p className="text-[11px] text-slate-500">
-                Kelola token sesi, bank soal live spreadsheet, & papan skor global
-              </p>
-            )}
           </div>
           <button
             type="button"
@@ -395,7 +430,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               }`}
             >
               <KeyRound className="w-3.5 h-3.5" />
-              <span>Token Sesi ({unusedCount})</span>
+              <span>Token ({unusedCount})</span>
             </button>
             <button
               type="button"
@@ -410,7 +445,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               }`}
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Live Soal (Sheet)</span>
+              <span>Bank Soal</span>
             </button>
             <button
               type="button"
@@ -425,7 +460,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
               }`}
             >
               <Users className="w-3.5 h-3.5" />
-              <span>Peserta (Sheet)</span>
+              <span>Peserta</span>
             </button>
             <button
               type="button"
@@ -445,19 +480,39 @@ export const AdminModal: React.FC<AdminModalProps> = ({
           </div>
         )}
 
+        {(errorMessage || successMessage) && (
+          <div className="px-4 sm:px-5 pt-2.5 shrink-0">
+            {errorMessage && (
+              <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-medium flex items-start justify-between gap-2">
+                <span>{errorMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => setErrorMessage('')}
+                  className="text-rose-500 hover:text-rose-800 shrink-0 cursor-pointer"
+                  aria-label="Tutup pesan"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-medium flex items-start justify-between gap-2">
+                <span>{successMessage}</span>
+                <button
+                  type="button"
+                  onClick={() => setSuccessMessage('')}
+                  className="text-emerald-600 hover:text-emerald-900 shrink-0 cursor-pointer"
+                  aria-label="Tutup pesan"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="p-4 sm:p-5 flex-1 overflow-y-auto space-y-3">
-          {errorMessage && (
-            <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-medium">
-              {errorMessage}
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl text-xs font-medium">
-              {successMessage}
-            </div>
-          )}
-
           {!isAuthenticated ? (
             <AdminLoginForm
               pinInput={pinInput}
@@ -495,6 +550,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             <AdminParticipantSheetTab
               config={participantConfig}
               isBusy={isParticipantBusy}
+              testStatus={participantTestStatus}
               copiedCode={copiedCode}
               onChangeConfig={setParticipantConfig}
               onSaveConfig={handleSaveParticipantSheet}

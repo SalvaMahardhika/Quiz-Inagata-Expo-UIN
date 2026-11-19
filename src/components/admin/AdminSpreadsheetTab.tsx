@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { RefreshCw, ChevronDown, ChevronUp, Copy, Check, Download, Image } from 'lucide-react';
+import { RefreshCw, ChevronDown, ChevronUp, Copy, Check, Download } from 'lucide-react';
 import { SpreadsheetConfig } from '../../services/quizApi';
 
 const APPS_SCRIPT_TEMPLATE = `// Quiz Inagata — Google Apps Script (Scan Soal Otomatis + Rekap Hasil)
@@ -7,70 +7,88 @@ var IGNORED_SHEETS = ['hasil', 'results', 'rekap', 'peserta', 'log', 'leaderboar
 
 // 1. Ambil seluruh sheet soal otomatis (1 sheet = 1 tipe soal)
 function doGet(e) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheets = ss.getSheets();
-  var topics = [];
+  try {
+    var ssId = (e && e.parameter && e.parameter.spreadsheetId) ? String(e.parameter.spreadsheetId).trim() : '';
+    var ss = ssId ? SpreadsheetApp.openById(ssId) : SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: false, error: 'Spreadsheet tidak ditemukan. Pastikan Apps Script dibuka dari Ekstensi -> Apps Script atau isi Link Google Spreadsheet di Panel Admin.' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    var sheets = ss.getSheets();
+    var topics = [];
 
-  for (var i = 0; i < sheets.length; i++) {
-    var sheet = sheets[i];
-    var name = sheet.getName();
-    if (IGNORED_SHEETS.indexOf(name.toLowerCase().trim()) !== -1) continue;
+    for (var i = 0; i < sheets.length; i++) {
+      var sheet = sheets[i];
+      var name = sheet.getName();
+      if (IGNORED_SHEETS.indexOf(name.toLowerCase().trim()) !== -1) continue;
 
-    var range = sheet.getDataRange();
-    var values = range.getValues();
-    var formulas = range.getFormulas();
-    if (values.length < 2) continue;
+      var range = sheet.getDataRange();
+      var values = range.getValues();
+      var formulas = range.getFormulas();
+      if (values.length < 2) continue;
 
-    var headers = values[0];
-    var questions = [];
-    for (var r = 1; r < values.length; r++) {
-      var rowObj = {};
-      var hasData = false;
-      for (var c = 0; c < headers.length; c++) {
-        var key = String(headers[c] || '').trim();
-        if (!key) continue;
-        var val = values[r][c];
-        var formula = formulas[r][c] || '';
+      var headers = values[0];
+      var questions = [];
+      for (var r = 1; r < values.length; r++) {
+        var rowObj = {};
+        var hasData = false;
+        for (var c = 0; c < headers.length; c++) {
+          var key = String(headers[c] || '').trim();
+          if (!key) continue;
+          var val = values[r][c];
+          var formula = formulas[r][c] || '';
 
-        // Ambil URL dari rumus =IMAGE("...") atau CellImage
-        var imgMatch = formula.match(/^=IMAGE\\(\\s*["']([^"']+)["']/i);
-        if (imgMatch && imgMatch[1]) {
-          val = imgMatch[1];
-        } else if (val && typeof val === 'object' && typeof val.getContentUrl === 'function') {
-          try { val = val.getContentUrl() || ''; } catch (err) { val = ''; }
+          // Ambil URL dari rumus =IMAGE("...") atau CellImage
+          var imgMatch = formula.match(/^=IMAGE\\(\\s*["']([^"']+)["']/i);
+          if (imgMatch && imgMatch[1]) {
+            val = imgMatch[1];
+          } else if (val && typeof val === 'object' && typeof val.getContentUrl === 'function') {
+            try { val = val.getContentUrl() || ''; } catch (err) { val = ''; }
+          }
+
+          if (val !== '' && val !== null && val !== undefined) hasData = true;
+          rowObj[key] = val;
         }
-
-        if (val !== '' && val !== null && val !== undefined) hasData = true;
-        rowObj[key] = val;
+        if (hasData) questions.push(rowObj);
       }
-      if (hasData) questions.push(rowObj);
+
+      if (questions.length > 0) {
+        topics.push({
+          sheetName: name,
+          questions: questions
+        });
+      }
     }
 
-    if (questions.length > 0) {
-      topics.push({
-        sheetName: name,
-        questions: questions
-      });
-    }
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: true, totalTopics: topics.length, topics: topics }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ ok: false, error: String(err) }))
+      .setMimeType(ContentService.MimeType.JSON);
   }
-
-  return ContentService
-    .createTextOutput(JSON.stringify({ ok: true, totalTopics: topics.length, topics: topics }))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // 2. Simpan rekap hasil peserta ke sheet "Hasil" (otomatis dibuat jika belum ada)
 function doPost(e) {
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var p = (e && e.parameter) ? e.parameter : {};
+    if ((!p.name && !p.nama) && e && e.postData && e.postData.contents) {
+      try { p = JSON.parse(e.postData.contents); } catch (err) {}
+    }
+    var ssId = p.spreadsheetId ? String(p.spreadsheetId).trim() : '';
+    var ss = ssId ? SpreadsheetApp.openById(ssId) : SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      return ContentService
+        .createTextOutput(JSON.stringify({ ok: false, error: 'Spreadsheet tidak ditemukan.' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     var logSheet = ss.getSheetByName('Hasil');
     if (!logSheet) {
       logSheet = ss.insertSheet('Hasil');
       logSheet.appendRow(['Waktu', 'Nama', 'Instansi', 'WhatsApp', 'Mode', 'Topik', 'Skor', 'Benar', 'Total Soal', 'Detail']);
-    }
-    var p = (e && e.parameter) ? e.parameter : {};
-    if ((!p.name && !p.nama) && e && e.postData && e.postData.contents) {
-      try { p = JSON.parse(e.postData.contents); } catch (err) {}
     }
     logSheet.appendRow([
       p.timestamp || p.waktu || new Date(),
@@ -84,8 +102,9 @@ function doPost(e) {
       Number(p.totalQuestions || p.total_soal || 0),
       p.detail || '-'
     ]);
+    SpreadsheetApp.flush();
     return ContentService
-      .createTextOutput(JSON.stringify({ ok: true }))
+      .createTextOutput(JSON.stringify({ ok: true, spreadsheetName: ss.getName(), spreadsheetUrl: ss.getUrl(), sheet: logSheet.getName(), rowNumber: logSheet.getLastRow() }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService
@@ -134,15 +153,11 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
 
   return (
     <div className="space-y-3.5">
-      {/* Unduh Template XLSX siap impor ke Google Sheets */}
       <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="min-w-0">
-          <div className="text-xs font-bold text-slate-900">
-            Spreadsheet 1: Bank Soal (6 Sheet = 6 Tipe Soal · 180 Soal)
-          </div>
+          <div className="text-xs font-bold text-slate-900">Template Bank Soal (.xlsx)</div>
           <p className="text-[11px] text-slate-600 mt-0.5">
-            Unduh file Excel (.xlsx) lalu unggah ke Google Sheets (File → Impor). Untuk rekap
-            daftar peserta &amp; nilai, atur di tab <strong>Peserta (Sheet)</strong>.
+            6 tab topik (180 soal). Impor ke Google Sheets via <strong>File → Impor</strong>.
           </p>
         </div>
         <a
@@ -151,16 +166,14 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
           className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-lg text-xs border-b-2 border-amber-700 flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition-all"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Unduh Template (.xlsx)</span>
+          <span>Unduh Template</span>
         </a>
       </div>
 
       <form onSubmit={onSaveAndSync} className="space-y-3">
         <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold text-slate-900">
-              Sumber Soal Live Spreadsheet (1 Sheet = 1 Topik)
-            </span>
+            <span className="text-xs font-bold text-slate-900">Sumber Soal</span>
             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
               <input
                 type="checkbox"
@@ -170,13 +183,13 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
                 }
                 className="rounded accent-amber-500"
               />
-              <span>Aktifkan</span>
+              <span>Aktif</span>
             </label>
           </div>
 
           <div>
             <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-              Link / ID Google Spreadsheet (Akses Publik: Siapa saja dapat melihat)
+              Link Google Spreadsheet
             </label>
             <input
               type="text"
@@ -194,13 +207,9 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
 
           <div className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-slate-700">
-                Scan Otomatis Tab Sheet (Tanpa Input Manual)
-              </span>
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900">
-                {detectedSheets.length > 0
-                  ? `${detectedSheets.length} Sheet = ${detectedSheets.length} Tipe Soal`
-                  : 'Menunggu Sinkronisasi'}
+              <span className="text-[11px] font-bold text-slate-700">Tab Terdeteksi</span>
+              <span className="text-[11px] font-mono font-bold text-amber-900">
+                {detectedSheets.length > 0 ? `${detectedSheets.length} topik` : 'Belum sinkron'}
               </span>
             </div>
 
@@ -215,15 +224,14 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
                       {sheet.nama}: {sheet.judul}
                     </span>
                     <span className="font-mono text-[10px] font-bold text-emerald-700 shrink-0">
-                      {sheet.questionCount} soal
+                      {sheet.questionCount}
                     </span>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Seluruh tab sheet di Google Spreadsheet akan dipindai otomatis menjadi tipe soal
-                sesuai jumlah sheet yang ada (misal 6 sheet = 6 tipe soal).
+              <p className="text-[11px] text-slate-500">
+                Setiap tab sheet otomatis dibaca sebagai 1 topik soal.
               </p>
             )}
           </div>
@@ -231,7 +239,7 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                URL Aplikasi Web Apps Script (Opsional)
+                URL Web App (Opsional)
               </label>
               <input
                 type="text"
@@ -256,7 +264,7 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
 
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                ID Penerapan / Deployment ID (Opsional)
+                ID Penerapan (Opsional)
               </label>
               <input
                 type="text"
@@ -296,155 +304,80 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
             className="h-9 px-3.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isBusy ? 'animate-spin' : ''}`} />
-            <span>Muat Ulang Soal</span>
+            <span>Muat Ulang</span>
           </button>
         </div>
       </form>
 
       {syncInfo && (
         <div
-          className={`p-2.5 border rounded-xl text-xs flex flex-wrap items-center justify-between gap-2 ${
-            syncInfo.source === 'unconfigured'
+          className={`p-3 border rounded-xl text-xs space-y-1 ${
+            syncInfo.source === 'unconfigured' || syncInfo.warning
               ? 'bg-rose-50 border-rose-200 text-rose-800'
               : 'bg-emerald-50/70 border-emerald-200 text-slate-700'
           }`}
         >
-          <span>
-            Sumber aktif:{' '}
-            <strong className="text-slate-900">
-              {syncInfo.source === 'apps_script'
-                ? 'Google Apps Script (Live)'
-                : syncInfo.source === 'spreadsheet'
-                ? 'Google Spreadsheet (Live)'
-                : 'Belum Terhubung'}
-            </strong>
-          </span>
-          <span className="font-mono text-[11px] font-bold">
-            {syncInfo.sheetTopicsCount} Tipe Soal · {syncInfo.totalLiveQuestions} Soal
-          </span>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Status:{' '}
+              <strong className="text-slate-900">
+                {syncInfo.source === 'apps_script'
+                  ? 'Apps Script'
+                  : syncInfo.source === 'spreadsheet'
+                  ? 'Google Sheets'
+                  : 'Belum terhubung'}
+              </strong>
+            </span>
+            <span className="font-mono text-[11px] font-bold">
+              {syncInfo.sheetTopicsCount} topik · {syncInfo.totalLiveQuestions} soal
+            </span>
+          </div>
+          {syncInfo.warning && (
+            <p className="text-[11px] text-rose-700 leading-relaxed font-medium">
+              {syncInfo.warning}
+            </p>
+          )}
         </div>
       )}
 
-      {/* Panduan Lengkap Setup Spreadsheet & Kode Apps Script */}
       <div className="border border-slate-200 rounded-xl overflow-hidden">
         <button
           type="button"
           onClick={() => setShowGuide((v) => !v)}
           className="w-full px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center justify-between text-xs font-bold text-slate-700 cursor-pointer"
         >
-          <span>Tutorial Lengkap Setup Spreadsheet & Kode Apps Script</span>
+          <span>Panduan Setup &amp; Kode Apps Script</span>
           {showGuide ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
         {showGuide && (
-          <div className="p-3.5 bg-white text-xs text-slate-600 space-y-3 border-t border-slate-200">
-            {/* Langkah 1: Siapkan Google Spreadsheet */}
-            <div className="space-y-1.5">
-              <div className="font-bold text-slate-900">
-                1. Siapkan Google Spreadsheet (Impor Template atau Buat Baru)
-              </div>
-              <ol className="list-decimal pl-4 space-y-1 text-[11px] leading-relaxed">
-                <li>
-                  Klik <strong>Unduh Template (.xlsx)</strong> di atas, lalu buka{' '}
-                  <code>sheets.google.com</code> dan buat spreadsheet baru.
-                </li>
-                <li>
-                  Klik menu <strong>File → Impor → Upload</strong> dan pilih file{' '}
-                  <code>Template_Soal_Quiz_Inagata.xlsx</code> (pilih opsi{' '}
-                  <em>Ganti spreadsheet</em>).
-                </li>
-                <li>
-                  Setiap <strong>1 tab sheet otomatis menjadi 1 tipe soal / topik</strong>{' '}
-                  (misalnya 6 sheet = 6 tipe soal; tambah atau hapus tab langsung di Google Sheets).
-                </li>
-                <li>
-                  Pastikan <strong>Baris 1</strong> pada setiap sheet berisi kolom header persis:
-                </li>
-              </ol>
-              <div className="p-2 bg-slate-100 rounded-lg font-mono text-[11px] text-slate-800 overflow-x-auto">
-                Kode | Pertanyaan | Gambar | Pilihan A | Pilihan B | Pilihan C | Pilihan D | Jawaban
-                Benar
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Kolom <strong>Jawaban Benar</strong> bisa diisi huruf <code>A</code>/<code>B</code>/
-                <code>C</code>/<code>D</code>, indeks <code>0</code>–<code>3</code>, atau teks
-                persis jawabannya. Sheet bernama <code>Hasil</code>, <code>Rekap</code>, atau{' '}
-                <code>Leaderboard</code> otomatis dilewati saat scan soal.
-              </p>
+          <div className="p-3.5 bg-white text-xs text-slate-600 space-y-2.5 border-t border-slate-200">
+            <ol className="list-decimal pl-4 space-y-1 text-[11px] leading-relaxed">
+              <li>
+                Unduh template <code>.xlsx</code> di atas lalu impor ke Google Sheets (
+                <strong>File → Impor</strong>). Tiap tab sheet otomatis jadi 1 topik.
+              </li>
+              <li>
+                Klik <strong>Bagikan</strong> → atur akses umum ke{' '}
+                <strong>Siapa saja yang memiliki link (Pelihat)</strong>.
+              </li>
+              <li>
+                Untuk gambar di sel: gunakan <em>Sisipkan → Gambar → Gambar dalam sel</em>,{' '}
+                <code>=IMAGE(&quot;url&quot;)</code>, atau link Google Drive publik.
+              </li>
+              <li>
+                Tempel link spreadsheet di atas lalu klik <strong>Simpan &amp; Sinkronkan</strong>.
+              </li>
+            </ol>
+
+            <div className="p-2 bg-slate-100 rounded-lg font-mono text-[10px] text-slate-800 overflow-x-auto">
+              Header baris 1: Kode | Pertanyaan | Gambar | Pilihan A | Pilihan B | Pilihan C |
+              Pilihan D | Jawaban Benar
             </div>
 
-            {/* Langkah 2: Scan Gambar Langsung */}
-            <div className="p-2.5 bg-sky-50 border border-sky-200 rounded-lg text-[11px] text-sky-900 space-y-1">
-              <div className="font-bold flex items-center gap-1.5">
-                <Image className="w-3.5 h-3.5" />
-                <span>2. Cara Memasukkan Gambar di Kolom Gambar (Scan Otomatis):</span>
-              </div>
-              <ul className="list-disc pl-4 space-y-0.5 leading-relaxed">
-                <li>
-                  <strong>Gambar langsung di dalam sel:</strong> Klik sel kolom <code>Gambar</code>{' '}
-                  → pilih <em>Sisipkan (Insert) → Gambar → Gambar dalam sel</em>.
-                </li>
-                <li>
-                  <strong>Rumus / Link URL:</strong> Mendukung rumus{' '}
-                  <code>=IMAGE(&quot;https://...&quot;)</code>, link share Google Drive (
-                  <code>drive.google.com/file/d/...</code> akses publik), maupun URL gambar langsung.
-                </li>
-              </ul>
-            </div>
-
-            {/* Langkah 3: Hubungkan Link Spreadsheet */}
-            <div className="space-y-1">
-              <div className="font-bold text-slate-900">
-                3. Hubungkan Link Spreadsheet (Cara Cepat Tanpa Coding)
-              </div>
-              <ol className="list-decimal pl-4 space-y-0.5 text-[11px] leading-relaxed">
-                <li>
-                  Di kanan atas Google Sheets klik <strong>Bagikan (Share)</strong> → ubah Akses
-                  umum menjadi <strong>Siapa saja yang memiliki link</strong> (peran{' '}
-                  <em>Pelihat / Viewer</em>).
-                </li>
-                <li>
-                  Salin link spreadsheet dari address bar browser, tempel pada kolom{' '}
-                  <strong>Link / ID Google Spreadsheet</strong> di atas, lalu klik{' '}
-                  <strong>Simpan &amp; Sinkronkan</strong>.
-                </li>
-              </ol>
-            </div>
-
-            {/* Langkah 4: Setup Google Apps Script */}
-            <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-lg space-y-1.5">
-              <div className="font-bold text-slate-900">
-                4. Setup Google Apps Script (Opsional — Mendukung CellImage &amp; Rekap Sheet Hasil)
-              </div>
-              <ol className="list-decimal pl-4 space-y-0.5 text-[11px] text-slate-700 leading-relaxed">
-                <li>
-                  Di Google Sheets buka menu <strong>Ekstensi (Extensions) → Apps Script</strong>.
-                </li>
-                <li>
-                  Hapus fungsi bawaan <code>myFunction()</code>, lalu salin dan tempel seluruh kode
-                  di bawah ini ke editor, kemudian simpan (<code>Ctrl+S</code>).
-                </li>
-                <li>
-                  Klik <strong>Terapkan (Deploy) → Deployment baru (New deployment)</strong> → klik
-                  ikon roda gigi → pilih <strong>Aplikasi web (Web app)</strong>.
-                </li>
-                <li>
-                  Set <strong>Jalankan sebagai:</strong> <em>Saya (Me)</em> dan{' '}
-                  <strong>Yang memiliki akses:</strong> <em>Siapa saja (Anyone)</em> → klik{' '}
-                  <strong>Terapkan</strong> → setujui izin akses akun Google.
-                </li>
-                <li>
-                  Salin <strong>URL Aplikasi Web</strong> (berakhiran <code>/exec</code>), tempel ke
-                  kolom <strong>URL Web App Google Apps Script</strong> di atas, lalu klik{' '}
-                  <strong>Simpan &amp; Sinkronkan</strong>.
-                </li>
-              </ol>
-            </div>
-
-            {/* Blok Kode Apps Script */}
-            <div className="pt-0.5">
-              <div className="flex items-center justify-between mb-1">
+            <div className="space-y-1 pt-0.5">
+              <div className="flex items-center justify-between">
                 <span className="text-[11px] font-bold text-slate-800">
-                  Kode Lengkap Google Apps Script (<code>Code.gs</code> — doGet &amp; doPost):
+                  Apps Script Bank Soal (Opsional — untuk gambar dalam sel via JSON):
                 </span>
                 <button
                   type="button"
@@ -456,10 +389,14 @@ export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
                   ) : (
                     <Copy className="w-3 h-3" />
                   )}
-                  <span>{copiedCode === 'GAS_CODE' ? 'Tersalin!' : 'Salin Kode Lengkap'}</span>
+                  <span>{copiedCode === 'GAS_CODE' ? 'Tersalin' : 'Salin Kode'}</span>
                 </button>
               </div>
-              <pre className="p-2.5 bg-slate-900 text-slate-100 rounded-lg text-[10px] leading-relaxed overflow-x-auto max-h-48">
+              <p className="text-[11px] text-slate-500">
+                Buka <strong>Ekstensi → Apps Script</strong>, tempel kode di bawah, lalu{' '}
+                <strong>Terapkan → Aplikasi web → Siapa saja</strong>.
+              </p>
+              <pre className="p-2.5 bg-slate-900 text-slate-100 rounded-lg text-[10px] leading-relaxed overflow-x-auto max-h-44">
                 {APPS_SCRIPT_TEMPLATE}
               </pre>
             </div>

@@ -229,7 +229,16 @@ export function updateParticipantSheetConfig(
 
 export function testParticipantSheetConfig(
   pin: string
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{
+  ok: boolean;
+  sheetName?: string;
+  spreadsheetName?: string;
+  spreadsheetUrl?: string;
+  rowNumber?: number;
+  isLegacyResponse?: boolean;
+  testedAt?: string;
+  error?: string;
+}> {
   return requestJson('/api/admin/participant-sheet/test', {
     method: 'POST',
     headers: {
@@ -259,9 +268,11 @@ export function updateSpreadsheetConfig(
   pin: string,
   config: SpreadsheetConfig
 ): Promise<{
+  ok: boolean;
   config: SpreadsheetConfig;
+  liveTopics: LiveTopicsResponse;
   syncResult: {
-    source: 'spreadsheet' | 'apps_script' | 'fallback';
+    source: 'spreadsheet' | 'apps_script' | 'unconfigured';
     lastSyncedAt: string;
     sheetTopicsCount: number;
     totalLiveQuestions: number;

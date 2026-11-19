@@ -75,6 +75,14 @@ adminRoutes.put('/spreadsheet', requireAdminPin, async (req, res) => {
   res.json({
     ok: true,
     config,
+    liveTopics: {
+      topics: live.topics,
+      source: live.source,
+      lastSyncedAt: live.lastSyncedAt,
+      sheetTopicsCount: live.sheetTopicsCount,
+      totalLiveQuestions: live.totalLiveQuestions,
+      warning: live.warning,
+    },
     syncResult: {
       source: live.source,
       lastSyncedAt: live.lastSyncedAt,

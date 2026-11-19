@@ -29,13 +29,36 @@ export interface DiscoveredSheetTab {
   gid: string;
 }
 
-export function extractSpreadsheetId(urlOrId: string): string {
+export interface SpreadsheetTarget {
+  id: string;
+  isPublished: boolean;
+}
+
+export function parseSpreadsheetTarget(urlOrId: string): SpreadsheetTarget | null {
   const trimmed = (urlOrId || '').trim();
-  if (!trimmed) return '';
+  if (!trimmed) return null;
+
+  const pubMatch = trimmed.match(/\/spreadsheets\/d\/e\/([a-zA-Z0-9-_]+)/);
+  if (pubMatch && pubMatch[1]) {
+    return { id: pubMatch[1], isPublished: true };
+  }
+
   const match = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (match && match[1]) return match[1];
-  if (/^[a-zA-Z0-9-_]{20,}$/.test(trimmed)) return trimmed;
-  return '';
+  if (match && match[1] && match[1] !== 'e') {
+    return { id: match[1], isPublished: false };
+  }
+
+  if (/^2PACX-[a-zA-Z0-9-_]+$/.test(trimmed)) {
+    return { id: trimmed, isPublished: true };
+  }
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(trimmed)) {
+    return { id: trimmed, isPublished: false };
+  }
+  return null;
+}
+
+export function extractSpreadsheetId(urlOrId: string): string {
+  return parseSpreadsheetTarget(urlOrId)?.id || '';
 }
 
 export function normalizeAppsScriptUrl(urlOrDeploymentId: string): string {
@@ -439,36 +462,87 @@ export async function fetchSheetHtmlCellImages(
   return { byRowIndex, byKey };
 }
 
+export interface WorkbookExportResult {
+  topics: TopicPackage[] | null;
+  errorReason?: string;
+}
+
 /**
  * Mengunduh & memparsing seluruh workbook Google Sheets (.xlsx) secara otomatis,
  * sehingga seluruh tab sheet terdeteksi 100% sesuai jumlah sheet yang ada.
  */
 export async function fetchWorkbookSheetsFromExport(
   sheetId: string,
-  gidLookup: Map<string, string>
-): Promise<TopicPackage[] | null> {
+  gidLookup: Map<string, string>,
+  isPublished = false
+): Promise<WorkbookExportResult> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    const res = await fetch(
-      `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`,
-      { signal: controller.signal, redirect: 'follow' }
-    );
+    const timer = setTimeout(() => controller.abort(), 16000);
+    const exportUrl = isPublished
+      ? `https://docs.google.com/spreadsheets/d/e/${sheetId}/pub?output=xlsx`
+      : `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
+    const res = await fetch(exportUrl, { signal: controller.signal, redirect: 'follow' });
     clearTimeout(timer);
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        return {
+          topics: null,
+          errorReason:
+            'Akses Google Spreadsheet ditolak (HTTP ' +
+            res.status +
+            '). Pastikan Bagikan diset ke "Siapa saja yang memiliki link (Pelihat)".',
+        };
+      }
+      if (res.status === 404) {
+        return {
+          topics: null,
+          errorReason: 'Link atau ID Google Spreadsheet tidak ditemukan (HTTP 404).',
+        };
+      }
+      return {
+        topics: null,
+        errorReason: `Gagal mengunduh Google Spreadsheet (HTTP ${res.status}).`,
+      };
+    }
+
     const contentType = res.headers.get('content-type') || '';
-    if (contentType.includes('text/html')) return null;
+    if (res.url.includes('accounts.google.com') || contentType.includes('text/html')) {
+      return {
+        topics: null,
+        errorReason:
+          'Google Spreadsheet masih meminta login Google. Ubah pengaturan Bagikan menjadi "Siapa saja yang memiliki link (Pelihat)".',
+      };
+    }
 
     const buf = Buffer.from(await res.arrayBuffer());
     const wb = XLSX.read(buf, { type: 'buffer', cellFormula: true });
-    if (!wb.SheetNames || wb.SheetNames.length === 0) return null;
+    if (!wb.SheetNames || wb.SheetNames.length === 0) {
+      return { topics: null, errorReason: 'Tidak ada tab sheet di dalam spreadsheet.' };
+    }
+
+    const activeSheets = wb.SheetNames.filter(
+      (s) => !IGNORED_SHEET_TABS.has(s.trim().toLowerCase())
+    );
+
+    // Pindai gambar sel HTML secara paralel untuk seluruh sheet yang punya gid
+    const cellImageMapBySheet = new Map<string, HtmlCellImageLookup>();
+    if (!isPublished) {
+      await Promise.all(
+        activeSheets.map(async (sheetName) => {
+          const gid = gidLookup.get(sheetName.trim().toLowerCase()) || '';
+          if (gid) {
+            const imgs = await fetchSheetHtmlCellImages(sheetId, gid);
+            cellImageMapBySheet.set(sheetName, imgs);
+          }
+        })
+      );
+    }
 
     const loadedTopics: TopicPackage[] = [];
 
-    for (const sheetName of wb.SheetNames) {
-      if (IGNORED_SHEET_TABS.has(sheetName.trim().toLowerCase())) continue;
-
+    for (const sheetName of activeSheets) {
       const ws = wb.Sheets[sheetName];
       if (!ws || !ws['!ref']) continue;
 
@@ -489,10 +563,10 @@ export async function fetchWorkbookSheetsFromExport(
         return n === 'gambar' || n === 'image' || n === 'urlgambar';
       });
 
-      const gid = gidLookup.get(sheetName.trim().toLowerCase()) || '';
-      const cellImages: HtmlCellImageLookup = gid
-        ? await fetchSheetHtmlCellImages(sheetId, gid)
-        : { byRowIndex: new Map<number, string>(), byKey: new Map<string, string>() };
+      const cellImages: HtmlCellImageLookup = cellImageMapBySheet.get(sheetName) || {
+        byRowIndex: new Map<number, string>(),
+        byKey: new Map<string, string>(),
+      };
 
       const topicId = loadedTopics.length + 1;
       const questions: RawQuestion[] = [];
@@ -560,8 +634,25 @@ export async function fetchWorkbookSheetsFromExport(
       }
     }
 
-    return loadedTopics.length > 0 ? loadedTopics : null;
-  } catch {
-    return null;
+    if (loadedTopics.length === 0) {
+      return {
+        topics: null,
+        errorReason:
+          'Spreadsheet terbaca, tetapi tidak ditemukan soal valid. Pastikan Baris 1 berisi kolom header: Kode | Pertanyaan | Gambar | Pilihan A | Pilihan B | Pilihan C | Pilihan D | Jawaban Benar.',
+      };
+    }
+
+    return { topics: loadedTopics };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return {
+        topics: null,
+        errorReason: 'Koneksi ke Google Spreadsheet timeout (>16 detik). Silakan coba ulangi.',
+      };
+    }
+    return {
+      topics: null,
+      errorReason: err?.message || 'Gagal membaca file spreadsheet.',
+    };
   }
 }

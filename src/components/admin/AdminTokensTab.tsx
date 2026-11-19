@@ -50,12 +50,8 @@ export const AdminTokensTab: React.FC<AdminTokensTabProps> = ({
     <div className="space-y-4">
       <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-3">
         <div className="flex items-center justify-between">
-          <h4 className="text-xs font-bold text-slate-900">
-            Buat Token Baru (1 Token = 1 Sesi)
-          </h4>
-          <span className="text-[11px] font-medium text-amber-800">
-            Berlaku di semua perangkat
-          </span>
+          <h4 className="text-xs font-bold text-slate-900">Buat Token</h4>
+          <span className="text-[11px] font-medium text-amber-800">1 token = 1 sesi</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -98,7 +94,7 @@ export const AdminTokensTab: React.FC<AdminTokensTabProps> = ({
               type="text"
               value={tokenLabel}
               onChange={(e) => setTokenLabel(e.target.value)}
-              placeholder="Misal: Booth A"
+              placeholder="Contoh: Booth A"
               className="w-full h-9 px-2.5 text-xs text-slate-900 bg-white border border-slate-300 rounded-lg outline-none focus:border-amber-500"
             />
           </div>
@@ -111,7 +107,7 @@ export const AdminTokensTab: React.FC<AdminTokensTabProps> = ({
           className="w-full h-9 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-lg text-xs border-b-2 border-amber-700 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>{isBusy ? 'Membuat...' : `Generate ${tokenCount} Token`}</span>
+          <span>{isBusy ? 'Membuat...' : `Buat ${tokenCount} Token`}</span>
         </button>
       </div>
 
@@ -167,7 +163,7 @@ export const AdminTokensTab: React.FC<AdminTokensTabProps> = ({
       <div className="max-h-64 overflow-y-auto space-y-1.5 pr-0.5">
         {filteredTokens.length === 0 ? (
           <div className="text-center py-8 text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
-            Belum ada token. Klik Generate Token di atas untuk membuat.
+            Belum ada token.
           </div>
         ) : (
           filteredTokens.map((t) => (

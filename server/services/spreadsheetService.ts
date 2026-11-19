@@ -6,7 +6,6 @@ import {
   TOPIC_ICONS,
   discoverGoogleSheetTabs,
   extractAppsScriptDeploymentId,
-  extractSpreadsheetId,
   fetchSheetHtmlCellImages,
   fetchWorkbookSheetsFromExport,
   normalizeAppsScriptUrl,
@@ -14,6 +13,7 @@ import {
   parseCorrectIndex,
   parseGvizJson,
   parseSheetNameToTitle,
+  parseSpreadsheetTarget,
   rowObjectToQuestion,
 } from '../lib/sheetParsers.ts';
 import type { LiveQuestionsCache, SpreadsheetConfig } from '../types.ts';
@@ -38,31 +38,31 @@ spreadsheetConfig = {
   deploymentId:
     spreadsheetConfig.deploymentId ||
     extractAppsScriptDeploymentId(spreadsheetConfig.appsScriptUrl || ''),
-  appsScriptUrl:
-    normalizeAppsScriptUrl(
-      spreadsheetConfig.appsScriptUrl || spreadsheetConfig.deploymentId || ''
-    ),
+  appsScriptUrl: normalizeAppsScriptUrl(
+    spreadsheetConfig.appsScriptUrl || spreadsheetConfig.deploymentId || ''
+  ),
 };
 
 let liveCache: LiveQuestionsCache | null = null;
 
 async function fetchFromGoogleSheetId(
-  sheetId: string
-): Promise<{ topics: TopicPackage[] } | null> {
-  // 1. Scan seluruh tab + gid dari /htmlview secara otomatis
-  const discoveredTabs = await discoverGoogleSheetTabs(sheetId);
+  sheetId: string,
+  isPublished = false
+): Promise<{ topics: TopicPackage[] | null; errorReason?: string }> {
+  // 1. Scan seluruh tab + gid dari /htmlview secara otomatis (hanya untuk sheet standar)
+  const discoveredTabs = isPublished ? [] : await discoverGoogleSheetTabs(sheetId);
   const gidLookup = new Map<string, string>();
   discoveredTabs.forEach((t) => gidLookup.set(t.name.trim().toLowerCase(), t.gid));
 
   // 2. Prioritas: unduh workbook XLSX resmi agar 100% seluruh sheet terdeteksi otomatis & akurat
-  const fromExport = await fetchWorkbookSheetsFromExport(sheetId, gidLookup);
-  if (fromExport && fromExport.length > 0) {
-    return { topics: fromExport };
+  const fromExport = await fetchWorkbookSheetsFromExport(sheetId, gidLookup, isPublished);
+  if (fromExport.topics && fromExport.topics.length > 0) {
+    return { topics: fromExport.topics };
   }
 
   // 3. Cadangan: scan tiap tab dari daftar discoveredTabs via gviz + htmlview cell images
   if (discoveredTabs.length === 0) {
-    return null;
+    return { topics: null, errorReason: fromExport.errorReason };
   }
 
   const loadedTopics: TopicPackage[] = [];
@@ -138,28 +138,93 @@ async function fetchFromGoogleSheetId(
     }
   }
 
-  return loadedTopics.length > 0 ? { topics: loadedTopics } : null;
+  if (loadedTopics.length > 0) {
+    return { topics: loadedTopics };
+  }
+  return { topics: null, errorReason: fromExport.errorReason };
 }
 
-async function fetchFromAppsScript(scriptUrl: string): Promise<TopicPackage[] | null> {
+async function fetchFromAppsScript(
+  scriptUrl: string,
+  spreadsheetId = ''
+): Promise<{ topics: TopicPackage[] | null; errorReason?: string }> {
   const cleanUrl = normalizeAppsScriptUrl(scriptUrl);
-  if (!cleanUrl) return null;
+  if (!cleanUrl) return { topics: null };
+
+  if (cleanUrl.includes('docs.google.com/spreadsheets/')) {
+    return {
+      topics: null,
+      errorReason:
+        'Kolom Apps Script berisi link Google Spreadsheet, bukan URL Aplikasi Web (/macros/s/.../exec).',
+    };
+  }
+  if (cleanUrl.includes('/macros/library/')) {
+    return {
+      topics: null,
+      errorReason:
+        'URL yang dimasukkan adalah URL Library, bukan URL Aplikasi Web (/exec).',
+    };
+  }
+  if (/\/dev(\?|$)/i.test(cleanUrl)) {
+    return {
+      topics: null,
+      errorReason:
+        'Gunakan URL Aplikasi Web berakhiran /exec, bukan /dev (khusus mode edit pribadi).',
+    };
+  }
 
   try {
     const separator = cleanUrl.includes('?') ? '&' : '?';
-    const targetUrl = `${cleanUrl}${separator}action=questions`;
+    const ssParam = spreadsheetId ? `&spreadsheetId=${encodeURIComponent(spreadsheetId)}` : '';
+    const targetUrl = `${cleanUrl}${separator}action=questions${ssParam}`;
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
+    const timer = setTimeout(() => controller.abort(), 20000);
     const res = await fetch(targetUrl, { signal: controller.signal, redirect: 'follow' });
     clearTimeout(timer);
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      return {
+        topics: null,
+        errorReason: `Apps Script Bank Soal merespons HTTP ${res.status}. Pastikan akses diset ke "Siapa saja (Anyone)".`,
+      };
+    }
+
     const text = await res.text();
-    if (!text.trim().startsWith('{') && !text.trim().startsWith('[')) {
-      return null;
+    if (res.url.includes('accounts.google.com') || /^\s*</.test(text)) {
+      if (text.includes('Script function not found')) {
+        return {
+          topics: null,
+          errorReason:
+            'Fungsi doGet(e) tidak ditemukan di Apps Script Bank Soal. Salin kode doGet dari Panduan lalu Deploy Versi Baru.',
+        };
+      }
+      return {
+        topics: null,
+        errorReason:
+          'Apps Script Bank Soal mengembalikan halaman HTML/login Google. Pastikan "Yang memiliki akses" diset ke "Siapa saja (Anyone)" dan sudah Deploy Versi Baru.',
+      };
     }
 
     const data = JSON.parse(text);
+    if (data && typeof data === 'object' && !Array.isArray(data) && data.ok === false) {
+      return {
+        topics: null,
+        errorReason: String(data.error || 'Apps Script Bank Soal mengembalikan error.'),
+      };
+    }
+    if (
+      data &&
+      typeof data === 'object' &&
+      !Array.isArray(data) &&
+      String(data.service || '').toLowerCase().includes('daftar peserta')
+    ) {
+      return {
+        topics: null,
+        errorReason:
+          'URL Apps Script yang dimasukkan adalah milik Spreadsheet Daftar Peserta (hanya doPost), bukan Apps Script Bank Soal (doGet topics).',
+      };
+    }
+
     const rawSheets: any[] = Array.isArray(data)
       ? data
       : Array.isArray(data.topics)
@@ -168,7 +233,13 @@ async function fetchFromAppsScript(scriptUrl: string): Promise<TopicPackage[] | 
       ? data.sheets
       : [];
 
-    if (rawSheets.length === 0) return null;
+    if (rawSheets.length === 0) {
+      return {
+        topics: null,
+        errorReason:
+          'Apps Script aktif, tetapi tidak menghasilkan daftar soal (`topics` kosong). Periksa sheet soal Anda memiliki Baris 1 header & minimal 1 soal.',
+      };
+    }
 
     const loadedTopics: TopicPackage[] = [];
 
@@ -228,9 +299,25 @@ async function fetchFromAppsScript(scriptUrl: string): Promise<TopicPackage[] | 
       }
     });
 
-    return loadedTopics.length > 0 ? loadedTopics : null;
-  } catch {
-    return null;
+    if (loadedTopics.length === 0) {
+      return {
+        topics: null,
+        errorReason:
+          'Apps Script terhubung, namun tidak ada soal valid yang cocok dengan header (Kode, Pertanyaan, Pilihan A..D, Jawaban Benar).',
+      };
+    }
+    return { topics: loadedTopics };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return {
+        topics: null,
+        errorReason: 'Koneksi ke Apps Script Bank Soal timeout (>20 detik).',
+      };
+    }
+    return {
+      topics: null,
+      errorReason: err?.message || 'Gagal membaca JSON dari Apps Script Bank Soal.',
+    };
   }
 }
 
@@ -269,17 +356,20 @@ export async function getLiveTopics(forceRefresh = false): Promise<LiveQuestions
   let warning: string | undefined;
 
   if (spreadsheetConfig.enabled) {
-    const sheetId = extractSpreadsheetId(spreadsheetConfig.spreadsheetUrlOrId);
+    const target = parseSpreadsheetTarget(spreadsheetConfig.spreadsheetUrlOrId);
     const effectiveScriptUrl = normalizeAppsScriptUrl(
       spreadsheetConfig.appsScriptUrl || spreadsheetConfig.deploymentId || ''
     );
+    let scriptError: string | undefined;
+    let sheetError: string | undefined;
 
     if (effectiveScriptUrl) {
-      const fromGas = await fetchFromAppsScript(effectiveScriptUrl);
-      if (fromGas && fromGas.length > 0) {
+      const ssIdForScript = target && !target.isPublished ? target.id : '';
+      const fromGas = await fetchFromAppsScript(effectiveScriptUrl, ssIdForScript);
+      if (fromGas.topics && fromGas.topics.length > 0) {
         const recordMap: Record<number, TopicPackage> = {};
         let totalQ = 0;
-        fromGas.forEach((t) => {
+        fromGas.topics.forEach((t) => {
           recordMap[t.id] = t;
           totalQ += t.soal.length;
         });
@@ -288,17 +378,18 @@ export async function getLiveTopics(forceRefresh = false): Promise<LiveQuestions
           topics: recordMap,
           source: 'apps_script',
           lastSyncedAt: new Date().toISOString(),
-          sheetTopicsCount: fromGas.length,
+          sheetTopicsCount: fromGas.topics.length,
           totalLiveQuestions: totalQ,
           fetchedAtMs: now,
         };
         return liveCache;
       }
+      scriptError = fromGas.errorReason;
     }
 
-    if (sheetId) {
-      const fromSheet = await fetchFromGoogleSheetId(sheetId);
-      if (fromSheet && fromSheet.topics.length > 0) {
+    if (target) {
+      const fromSheet = await fetchFromGoogleSheetId(target.id, target.isPublished);
+      if (fromSheet.topics && fromSheet.topics.length > 0) {
         const recordMap: Record<number, TopicPackage> = {};
         let totalQ = 0;
         fromSheet.topics.forEach((t) => {
@@ -315,10 +406,19 @@ export async function getLiveTopics(forceRefresh = false): Promise<LiveQuestions
           fetchedAtMs: now,
         };
         return liveCache;
-      } else {
-        warning =
-          'Gagal memindai tab soal dari Google Spreadsheet. Pastikan link dibagikan "Siapa saja dapat melihat" dan baris 1 berisi header yang sesuai.';
       }
+      sheetError = fromSheet.errorReason;
+    }
+
+    if (scriptError && !target) {
+      warning = scriptError;
+    } else if (sheetError) {
+      warning = scriptError ? `${sheetError} (${scriptError})` : sheetError;
+    } else if (scriptError) {
+      warning = scriptError;
+    } else if (target) {
+      warning =
+        'Gagal memindai tab soal dari Google Spreadsheet. Pastikan link dibagikan "Siapa saja dapat melihat" dan baris 1 berisi header yang sesuai.';
     } else {
       warning =
         'Link Google Spreadsheet belum diisi. Unduh template Excel (.xlsx) di Admin, unggah ke Google Sheets, lalu tempelkan link-nya di tab Live Soal.';

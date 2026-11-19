@@ -6,6 +6,7 @@ import {
 } from '../lib/jsonStore.ts';
 import {
   extractAppsScriptDeploymentId,
+  extractSpreadsheetId,
   normalizeAppsScriptUrl,
 } from '../lib/sheetParsers.ts';
 import type { ParticipantLogPayload, ParticipantSheetConfig } from '../types.ts';
@@ -19,7 +20,7 @@ let participantSheetConfig: ParticipantSheetConfig = readJsonFile<ParticipantShe
     spreadsheetUrl: '',
     appsScriptUrl: initialParticipantScriptUrl,
     deploymentId: extractAppsScriptDeploymentId(initialParticipantScriptUrl),
-    sheetName: 'Daftar Peserta',
+    sheetName: 'Sheet1',
     enabled: true,
   }
 );
@@ -54,7 +55,7 @@ export function updateParticipantSheetConfigState(
     ).trim(),
     appsScriptUrl: resolvedUrl,
     deploymentId: resolvedDepId,
-    sheetName: String(input.sheetName ?? participantSheetConfig.sheetName).trim() || 'Daftar Peserta',
+    sheetName: String(input.sheetName ?? participantSheetConfig.sheetName).trim() || 'Sheet1',
     enabled:
       typeof input.enabled === 'boolean' ? input.enabled : participantSheetConfig.enabled,
   };
@@ -62,9 +63,21 @@ export function updateParticipantSheetConfigState(
   return participantSheetConfig;
 }
 
+export interface ParticipantLogResult {
+  ok: boolean;
+  skipped?: boolean;
+  sheetName?: string;
+  spreadsheetName?: string;
+  spreadsheetUrl?: string;
+  rowNumber?: number;
+  isLegacyResponse?: boolean;
+  testedAt?: string;
+  error?: string;
+}
+
 export async function sendParticipantLogToSheet(
   payload: ParticipantLogPayload
-): Promise<{ ok: boolean; skipped?: boolean; error?: string }> {
+): Promise<ParticipantLogResult> {
   if (!participantSheetConfig.enabled) {
     return { ok: true, skipped: true };
   }
@@ -80,6 +93,33 @@ export async function sendParticipantLogToSheet(
     };
   }
 
+  if (targetUrl.includes('docs.google.com/spreadsheets/')) {
+    return {
+      ok: false,
+      error:
+        'Kolom Apps Script berisi link Google Spreadsheet, bukan URL Aplikasi Web (/macros/s/.../exec).',
+    };
+  }
+  if (targetUrl.includes('/macros/library/')) {
+    return {
+      ok: false,
+      error: 'Jangan gunakan URL Library. Salin bagian "Aplikasi web → URL" yang berakhiran /exec.',
+    };
+  }
+  if (/\/dev(\?|$)/i.test(targetUrl)) {
+    return {
+      ok: false,
+      error: 'Gunakan URL Aplikasi Web berakhiran /exec, bukan URL uji coba /dev.',
+    };
+  }
+  if (!/^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec/i.test(targetUrl)) {
+    return {
+      ok: false,
+      error:
+        'Format URL Apps Script tidak valid. Harus berupa https://script.google.com/macros/s/.../exec atau ID Penerapan (AKfycb...).',
+    };
+  }
+
   try {
     const nowWib =
       payload.timestamp ||
@@ -90,10 +130,13 @@ export async function sendParticipantLogToSheet(
     const cleanSessionType = String(payload.sessionType || '').trim() || 'Solo';
     const cleanScore = Number(payload.score) || 0;
     const cleanTopic = String(payload.topic || '').trim() || '-';
+    const targetSheet = participantSheetConfig.sheetName || 'Sheet1';
+    const targetSpreadsheetId = extractSpreadsheetId(participantSheetConfig.spreadsheetUrl || '');
 
     const formBody = new URLSearchParams({
       action: 'PARTICIPANT_LOG',
-      sheetName: participantSheetConfig.sheetName || 'Daftar Peserta',
+      spreadsheetId: targetSpreadsheetId,
+      sheetName: targetSheet,
       timestamp: nowWib,
       waktu: nowWib,
       name: cleanName,
@@ -114,7 +157,7 @@ export async function sendParticipantLogToSheet(
     }).toString();
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 9000);
+    const timer = setTimeout(() => controller.abort(), 20000);
     const res = await fetch(targetUrl, {
       method: 'POST',
       headers: {
@@ -134,19 +177,54 @@ export async function sendParticipantLogToSheet(
     }
 
     const text = await res.text();
-    if (text.trim().startsWith('{')) {
-      try {
-        const json = JSON.parse(text);
-        if (json && json.ok === false) {
-          return { ok: false, error: json.error || 'Apps Script mengembalikan error.' };
-        }
-      } catch {
-        // Ignore non-JSON body
+    const trimmedText = text.trim();
+
+    if (res.url.includes('accounts.google.com') || trimmedText.startsWith('<')) {
+      if (trimmedText.includes('Script function not found')) {
+        return {
+          ok: false,
+          error:
+            'Fungsi doPost(e) tidak ditemukan di Apps Script. Salin kode dari tutorial lalu Deploy sebagai Versi Baru.',
+        };
       }
+      return {
+        ok: false,
+        error:
+          'Apps Script mengembalikan halaman HTML/login Google. Pastikan "Yang memiliki akses" diset ke "Siapa saja (Anyone)" pada deployment terbaru.',
+      };
     }
 
-    return { ok: true };
+    if (trimmedText.startsWith('{')) {
+      const json = JSON.parse(trimmedText);
+      if (json && json.ok === false) {
+        return { ok: false, error: json.error || 'Apps Script mengembalikan error.' };
+      }
+      const hasRichMeta =
+        typeof json?.rowNumber === 'number' && typeof json?.spreadsheetName === 'string';
+      return {
+        ok: true,
+        sheetName: json?.sheet || targetSheet,
+        spreadsheetName: json?.spreadsheetName || undefined,
+        spreadsheetUrl: json?.spreadsheetUrl || undefined,
+        rowNumber: typeof json?.rowNumber === 'number' ? json.rowNumber : undefined,
+        isLegacyResponse: !hasRichMeta,
+        testedAt: nowWib,
+      };
+    }
+
+    return {
+      ok: true,
+      sheetName: targetSheet,
+      isLegacyResponse: true,
+      testedAt: nowWib,
+    };
   } catch (err: any) {
+    if (err?.name === 'AbortError') {
+      return {
+        ok: false,
+        error: 'Koneksi ke Google Apps Script melebihi 20 detik (timeout). Silakan coba klik Uji lagi.',
+      };
+    }
     return {
       ok: false,
       error: err?.message || 'Gagal menghubungi URL Web App Google Apps Script.',
@@ -154,10 +232,7 @@ export async function sendParticipantLogToSheet(
   }
 }
 
-export async function testParticipantSheetConnection(): Promise<{
-  ok: boolean;
-  error?: string;
-}> {
+export async function testParticipantSheetConnection(): Promise<ParticipantLogResult> {
   const result = await sendParticipantLogToSheet({
     name: 'Uji Koneksi Admin',
     institution: 'Quiz Inagata',
@@ -170,7 +245,7 @@ export async function testParticipantSheetConnection(): Promise<{
   if (result.skipped) {
     return {
       ok: false,
-      error: result.error || 'Aktifkan dan isi URL Web App Apps Script terlebih dahulu.',
+      error: result.error || 'Aktifkan dan isi URL Web App / ID Penerapan terlebih dahulu.',
     };
   }
   return result;
