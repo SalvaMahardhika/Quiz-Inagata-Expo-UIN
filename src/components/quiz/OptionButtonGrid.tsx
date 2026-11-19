@@ -44,6 +44,7 @@ export const OptionButtonGrid: React.FC<OptionButtonGridProps> = ({
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-3 shrink-0 pt-1 pb-1 select-none">
       {options.map((option, idx) => {
+        const hasSelected = selectedOption !== null;
         const isSelected = selectedOption === option;
         const isCorrect = option === correctAnswerText;
         const cfg = KAHOOT_CONFIGS[idx % 4];
@@ -52,7 +53,9 @@ export const OptionButtonGrid: React.FC<OptionButtonGridProps> = ({
         let animClass = '';
 
         if (isAnswerLocked) {
-          if (isCorrect) {
+          if (!hasSelected) {
+            buttonClass = 'bg-slate-200 border-slate-300 text-slate-500 opacity-55';
+          } else if (isCorrect) {
             buttonClass = 'bg-emerald-500 border-emerald-700 text-white ring-4 ring-emerald-300';
             animClass = 'animate-pop';
           } else if (isSelected && !isCorrect) {
@@ -81,7 +84,7 @@ export const OptionButtonGrid: React.FC<OptionButtonGridProps> = ({
               </span>
             </div>
 
-            {isAnswerLocked && (
+            {isAnswerLocked && hasSelected && (
               <span className="shrink-0 pl-2">
                 {isCorrect && <Check className="w-5 h-5 text-white animate-bounce" />}
                 {isSelected && !isCorrect && <X className="w-5 h-5 text-white" />}

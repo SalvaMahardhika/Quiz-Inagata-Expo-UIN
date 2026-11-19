@@ -1,5 +1,5 @@
 import type { WebSocket } from 'ws';
-import type { TopicPackage } from '../src/types/quiz.ts';
+import type { RawQuestion, TopicPackage } from '../src/types/quiz.ts';
 
 export interface RoomPlayer {
   id: string;
@@ -10,6 +10,7 @@ export interface RoomPlayer {
   hasAnsweredCurrent: boolean;
   lastAnswerCorrect: boolean | null;
   isDisconnected?: boolean;
+  questions?: RoomQuestion[];
   ws?: WebSocket;
 }
 
@@ -34,11 +35,16 @@ export interface LeaderboardEntry {
 export interface QuizRoom {
   code: string;
   hostId: string;
+  hostName: string;
+  hostInstitution: string;
+  sessionToken: string;
+  tokenConsumed?: boolean;
   topicId: number;
   topicTitle: string;
   status: 'LOBBY' | 'PLAYING' | 'FINISHED';
   players: Map<string, RoomPlayer>;
   finalLeaderboard: LeaderboardEntry[];
+  topicQuestions?: RawQuestion[];
   questions: RoomQuestion[];
   currentQuestionIndex: number;
   questionTimer: NodeJS.Timeout | null;
@@ -80,11 +86,26 @@ export interface SpreadsheetConfig {
   appsScriptUrl: string;
   deploymentId: string;
   sheetNames: string[];
+  disabledSheets?: string[];
   enabled: boolean;
+}
+
+export interface AdminTopicItem {
+  id: number;
+  sheetKey: string;
+  sheetName: string;
+  nama: string;
+  judul: string;
+  questionCount: number;
+  meetsMinQuestions: boolean;
+  disabled: boolean;
+  activeForPlayers: boolean;
+  soal: RawQuestion[];
 }
 
 export interface LiveQuestionsCache {
   topics: Record<number, TopicPackage>;
+  adminTopics: AdminTopicItem[];
   source: 'spreadsheet' | 'apps_script' | 'unconfigured';
   lastSyncedAt: string;
   sheetTopicsCount: number;

@@ -1,6 +1,19 @@
 import { Router } from 'express';
+import { getSheetMedia } from '../lib/sheetMediaStore.ts';
 
 export const imageProxyRoutes = Router();
+
+imageProxyRoutes.get('/media/:id', (req, res) => {
+  const id = String(req.params.id || '').trim();
+  const item = id ? getSheetMedia(id) : undefined;
+  if (!item) {
+    res.status(404).send('Gambar tidak ditemukan');
+    return;
+  }
+  res.setHeader('Content-Type', item.contentType);
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.send(item.buf);
+});
 
 function isAllowedGoogleImageHost(hostname: string): boolean {
   const lower = hostname.toLowerCase();

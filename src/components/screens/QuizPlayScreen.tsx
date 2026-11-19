@@ -124,6 +124,18 @@ export const QuizPlayScreen: React.FC<QuizPlayScreenProps> = ({
         theme={theme}
       />
 
+      {isAnswerLocked && selectedOption === null && (
+        <div
+          className={`px-3 py-1.5 rounded-xl border text-center text-xs font-bold ${
+            theme.isDark
+              ? 'bg-slate-800/90 border-slate-700 text-slate-300'
+              : 'bg-slate-100 border-slate-300 text-slate-600'
+          }`}
+        >
+          Waktu habis — tidak menjawab soal ini
+        </div>
+      )}
+
       <OptionButtonGrid
         questionKode={question.kode}
         options={question.options || []}

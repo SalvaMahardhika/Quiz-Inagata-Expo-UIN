@@ -1,128 +1,10 @@
 import React, { useState } from 'react';
-import { RefreshCw, ChevronDown, ChevronUp, Copy, Check, Download } from 'lucide-react';
-import { SpreadsheetConfig } from '../../services/quizApi';
-
-const APPS_SCRIPT_TEMPLATE = `// Quiz Inagata — Google Apps Script (Scan Soal Otomatis + Rekap Hasil)
-var IGNORED_SHEETS = ['hasil', 'results', 'rekap', 'peserta', 'log', 'leaderboard', 'respon', 'response', 'responses'];
-
-// 1. Ambil seluruh sheet soal otomatis (1 sheet = 1 tipe soal)
-function doGet(e) {
-  try {
-    var ssId = (e && e.parameter && e.parameter.spreadsheetId) ? String(e.parameter.spreadsheetId).trim() : '';
-    var ss = ssId ? SpreadsheetApp.openById(ssId) : SpreadsheetApp.getActiveSpreadsheet();
-    if (!ss) {
-      return ContentService
-        .createTextOutput(JSON.stringify({ ok: false, error: 'Spreadsheet tidak ditemukan. Pastikan Apps Script dibuka dari Ekstensi -> Apps Script atau isi Link Google Spreadsheet di Panel Admin.' }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    var sheets = ss.getSheets();
-    var topics = [];
-
-    for (var i = 0; i < sheets.length; i++) {
-      var sheet = sheets[i];
-      var name = sheet.getName();
-      if (IGNORED_SHEETS.indexOf(name.toLowerCase().trim()) !== -1) continue;
-
-      var range = sheet.getDataRange();
-      var values = range.getValues();
-      var formulas = range.getFormulas();
-      if (values.length < 2) continue;
-
-      var headers = values[0];
-      var questions = [];
-      for (var r = 1; r < values.length; r++) {
-        var rowObj = {};
-        var hasData = false;
-        for (var c = 0; c < headers.length; c++) {
-          var key = String(headers[c] || '').trim();
-          if (!key) continue;
-          var val = values[r][c];
-          var formula = formulas[r][c] || '';
-
-          // Ambil URL dari rumus =IMAGE("...") atau CellImage
-          var imgMatch = formula.match(/^=IMAGE\\(\\s*["']([^"']+)["']/i);
-          if (imgMatch && imgMatch[1]) {
-            val = imgMatch[1];
-          } else if (val && typeof val === 'object' && typeof val.getContentUrl === 'function') {
-            try { val = val.getContentUrl() || ''; } catch (err) { val = ''; }
-          }
-
-          if (val !== '' && val !== null && val !== undefined) hasData = true;
-          rowObj[key] = val;
-        }
-        if (hasData) questions.push(rowObj);
-      }
-
-      if (questions.length > 0) {
-        topics.push({
-          sheetName: name,
-          questions: questions
-        });
-      }
-    }
-
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, totalTopics: topics.length, topics: topics }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: String(err) }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-// 2. Simpan rekap hasil peserta ke sheet "Hasil" (otomatis dibuat jika belum ada)
-function doPost(e) {
-  try {
-    var p = (e && e.parameter) ? e.parameter : {};
-    if ((!p.name && !p.nama) && e && e.postData && e.postData.contents) {
-      try { p = JSON.parse(e.postData.contents); } catch (err) {}
-    }
-    var ssId = p.spreadsheetId ? String(p.spreadsheetId).trim() : '';
-    var ss = ssId ? SpreadsheetApp.openById(ssId) : SpreadsheetApp.getActiveSpreadsheet();
-    if (!ss) {
-      return ContentService
-        .createTextOutput(JSON.stringify({ ok: false, error: 'Spreadsheet tidak ditemukan.' }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    var logSheet = ss.getSheetByName('Hasil');
-    if (!logSheet) {
-      logSheet = ss.insertSheet('Hasil');
-      logSheet.appendRow(['Waktu', 'Nama', 'Instansi', 'WhatsApp', 'Mode', 'Topik', 'Skor', 'Benar', 'Total Soal', 'Detail']);
-    }
-    logSheet.appendRow([
-      p.timestamp || p.waktu || new Date(),
-      p.name || p.nama || '-',
-      p.institution || p.instansi || '-',
-      p.phone || p.whatsapp || '-',
-      p.mode || p.mode_permainan || '-',
-      p.topic || p.topik || '-',
-      Number(p.score || p.skor || 0),
-      Number(p.correct || p.benar || 0),
-      Number(p.totalQuestions || p.total_soal || 0),
-      p.detail || '-'
-    ]);
-    SpreadsheetApp.flush();
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: true, spreadsheetName: ss.getName(), spreadsheetUrl: ss.getUrl(), sheet: logSheet.getName(), rowNumber: logSheet.getLastRow() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ ok: false, error: String(err) }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
-
-export interface DetectedSheetItem {
-  id: number;
-  nama: string;
-  judul: string;
-  questionCount: number;
-}
+import { RefreshCw, Check, Eye, X, Settings } from 'lucide-react';
+import { AdminTopicItem } from '../../services/quizApi';
 
 interface AdminSpreadsheetTabProps {
-  config: SpreadsheetConfig;
-  detectedSheets: DetectedSheetItem[];
+  adminTopics: AdminTopicItem[];
+  togglingSheetKey: string | null;
   syncInfo: {
     source: string;
     lastSyncedAt: string;
@@ -131,278 +13,280 @@ interface AdminSpreadsheetTabProps {
     warning?: string;
   } | null;
   isBusy: boolean;
-  copiedCode: string | null;
-  onChangeConfig: (updater: (prev: SpreadsheetConfig) => SpreadsheetConfig) => void;
-  onSaveAndSync: (e: React.FormEvent) => void;
   onForceRefresh: () => void;
-  onCopyText: (text: string, id: string) => void;
+  onToggleSheetDisabled: (sheetKey: string, nextDisabled: boolean) => void;
+  onOpenConfig: () => void;
 }
 
+const OPTION_LETTERS = ['A', 'B', 'C', 'D'] as const;
+
 export const AdminSpreadsheetTab: React.FC<AdminSpreadsheetTabProps> = ({
-  config,
-  detectedSheets,
+  adminTopics,
+  togglingSheetKey,
   syncInfo,
   isBusy,
-  copiedCode,
-  onChangeConfig,
-  onSaveAndSync,
   onForceRefresh,
-  onCopyText,
+  onToggleSheetDisabled,
+  onOpenConfig,
 }) => {
-  const [showGuide, setShowGuide] = useState(false);
+  const [previewSheetKey, setPreviewSheetKey] = useState<string | null>(null);
+  const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
+
+  const previewTopic = previewSheetKey
+    ? adminTopics.find((t) => t.sheetKey === previewSheetKey) || null
+    : null;
+  const activeCount = adminTopics.filter((t) => t.activeForPlayers).length;
 
   return (
-    <div className="space-y-3.5">
-      <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-        <div className="min-w-0">
-          <div className="text-xs font-bold text-slate-900">Template Bank Soal (.xlsx)</div>
-          <p className="text-[11px] text-slate-600 mt-0.5">
-            6 tab topik (180 soal). Impor ke Google Sheets via <strong>File → Impor</strong>.
-          </p>
-        </div>
-        <a
-          href="/Template_Soal_Quiz_Inagata.xlsx"
-          download="Template_Soal_Quiz_Inagata.xlsx"
-          className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold rounded-lg text-xs border-b-2 border-amber-700 flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition-all"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Unduh Template</span>
-        </a>
-      </div>
-
-      <form onSubmit={onSaveAndSync} className="space-y-3">
-        <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-bold text-slate-900">Sumber Soal</span>
-            <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={config.enabled}
-                onChange={(e) =>
-                  onChangeConfig((prev) => ({ ...prev, enabled: e.target.checked }))
-                }
-                className="rounded accent-amber-500"
-              />
-              <span>Aktif</span>
-            </label>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-              Link Google Spreadsheet
-            </label>
-            <input
-              type="text"
-              value={config.spreadsheetUrlOrId}
-              onChange={(e) =>
-                onChangeConfig((prev) => ({
-                  ...prev,
-                  spreadsheetUrlOrId: e.target.value,
-                }))
-              }
-              placeholder="https://docs.google.com/spreadsheets/d/.../edit"
-              className="w-full h-9 px-3 text-xs text-slate-900 bg-white border border-slate-300 rounded-lg outline-none focus:border-amber-500"
-            />
-          </div>
-
-          <div className="p-2.5 bg-white border border-slate-200 rounded-lg space-y-1.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-slate-700">Tab Terdeteksi</span>
-              <span className="text-[11px] font-mono font-bold text-amber-900">
-                {detectedSheets.length > 0 ? `${detectedSheets.length} topik` : 'Belum sinkron'}
-              </span>
-            </div>
-
-            {detectedSheets.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-0.5">
-                {detectedSheets.map((sheet) => (
-                  <div
-                    key={sheet.id}
-                    className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md text-[11px]"
-                  >
-                    <span className="font-semibold text-slate-800 truncate">
-                      {sheet.nama}: {sheet.judul}
-                    </span>
-                    <span className="font-mono text-[10px] font-bold text-emerald-700 shrink-0">
-                      {sheet.questionCount}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[11px] text-slate-500">
-                Setiap tab sheet otomatis dibaca sebagai 1 topik soal.
-              </p>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                URL Web App (Opsional)
-              </label>
-              <input
-                type="text"
-                value={config.appsScriptUrl}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  const match = val.match(/\/macros\/s\/([a-zA-Z0-9_-]+)/i);
-                  onChangeConfig((prev) => ({
-                    ...prev,
-                    appsScriptUrl: val,
-                    deploymentId: match?.[1]
-                      ? match[1]
-                      : !val.trim()
-                      ? ''
-                      : prev.deploymentId,
-                  }));
-                }}
-                placeholder="https://script.google.com/macros/s/.../exec"
-                className="w-full h-9 px-3 text-xs text-slate-900 bg-white border border-slate-300 rounded-lg outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                ID Penerapan (Opsional)
-              </label>
-              <input
-                type="text"
-                value={config.deploymentId || ''}
-                onChange={(e) => {
-                  const idVal = e.target.value;
-                  const cleanId = idVal.trim();
-                  onChangeConfig((prev) => ({
-                    ...prev,
-                    deploymentId: idVal,
-                    appsScriptUrl: /^[a-zA-Z0-9_-]{20,}$/.test(cleanId)
-                      ? `https://script.google.com/macros/s/${cleanId}/exec`
-                      : !cleanId
-                      ? ''
-                      : prev.appsScriptUrl,
-                  }));
-                }}
-                placeholder="AKfycb..."
-                className="w-full h-9 px-3 text-xs font-mono text-slate-900 bg-white border border-slate-300 rounded-lg outline-none focus:border-amber-500"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-2">
-          <button
-            type="submit"
-            disabled={isBusy}
-            className="flex-1 h-9 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
-          >
-            {isBusy ? 'Menyimpan...' : 'Simpan & Sinkronkan'}
-          </button>
-          <button
-            type="button"
-            onClick={onForceRefresh}
-            disabled={isBusy}
-            className="h-9 px-3.5 bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isBusy ? 'animate-spin' : ''}`} />
-            <span>Muat Ulang</span>
-          </button>
-        </div>
-      </form>
-
-      {syncInfo && (
-        <div
-          className={`p-3 border rounded-xl text-xs space-y-1 ${
-            syncInfo.source === 'unconfigured' || syncInfo.warning
-              ? 'bg-rose-50 border-rose-200 text-rose-800'
-              : 'bg-emerald-50/70 border-emerald-200 text-slate-700'
-          }`}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-3">
+      {/* Bar Status & Aksi Cepat */}
+      <div
+        className={`p-3 border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs ${
+          !syncInfo || syncInfo.source === 'unconfigured'
+            ? 'bg-rose-50 border-rose-200 text-rose-800'
+            : syncInfo.warning
+            ? 'bg-amber-50 border-amber-200 text-amber-900'
+            : 'bg-emerald-50/70 border-emerald-200 text-slate-700'
+        }`}
+      >
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span>
-              Status:{' '}
+              Sumber:{' '}
               <strong className="text-slate-900">
-                {syncInfo.source === 'apps_script'
+                {syncInfo?.source === 'apps_script'
                   ? 'Apps Script'
-                  : syncInfo.source === 'spreadsheet'
+                  : syncInfo?.source === 'spreadsheet'
                   ? 'Google Sheets'
                   : 'Belum terhubung'}
               </strong>
             </span>
-            <span className="font-mono text-[11px] font-bold">
-              {syncInfo.sheetTopicsCount} topik · {syncInfo.totalLiveQuestions} soal
-            </span>
+            {syncInfo && (
+              <span className="font-mono text-[11px] font-bold">
+                · {syncInfo.sheetTopicsCount} topik tampil · {syncInfo.totalLiveQuestions} soal
+              </span>
+            )}
           </div>
-          {syncInfo.warning && (
-            <p className="text-[11px] text-rose-700 leading-relaxed font-medium">
+          {syncInfo?.warning && (
+            <p
+              className={`text-[11px] leading-snug font-medium ${
+                syncInfo.source === 'unconfigured' ? 'text-rose-700' : 'text-amber-800'
+              }`}
+            >
               {syncInfo.warning}
             </p>
           )}
         </div>
-      )}
 
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setShowGuide((v) => !v)}
-          className="w-full px-3.5 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center justify-between text-xs font-bold text-slate-700 cursor-pointer"
-        >
-          <span>Panduan Setup &amp; Kode Apps Script</span>
-          {showGuide ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-        {showGuide && (
-          <div className="p-3.5 bg-white text-xs text-slate-600 space-y-2.5 border-t border-slate-200">
-            <ol className="list-decimal pl-4 space-y-1 text-[11px] leading-relaxed">
-              <li>
-                Unduh template <code>.xlsx</code> di atas lalu impor ke Google Sheets (
-                <strong>File → Impor</strong>). Tiap tab sheet otomatis jadi 1 topik.
-              </li>
-              <li>
-                Klik <strong>Bagikan</strong> → atur akses umum ke{' '}
-                <strong>Siapa saja yang memiliki link (Pelihat)</strong>.
-              </li>
-              <li>
-                Untuk gambar di sel: gunakan <em>Sisipkan → Gambar → Gambar dalam sel</em>,{' '}
-                <code>=IMAGE(&quot;url&quot;)</code>, atau link Google Drive publik.
-              </li>
-              <li>
-                Tempel link spreadsheet di atas lalu klik <strong>Simpan &amp; Sinkronkan</strong>.
-              </li>
-            </ol>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={onForceRefresh}
+            disabled={isBusy}
+            className="h-8 px-3 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isBusy ? 'animate-spin' : ''}`} />
+            <span>Muat Ulang</span>
+          </button>
+          <button
+            type="button"
+            onClick={onOpenConfig}
+            className="h-8 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>Konfigurasi</span>
+          </button>
+        </div>
+      </div>
 
-            <div className="p-2 bg-slate-100 rounded-lg font-mono text-[10px] text-slate-800 overflow-x-auto">
-              Header baris 1: Kode | Pertanyaan | Gambar | Pilihan A | Pilihan B | Pilihan C |
-              Pilihan D | Jawaban Benar
-            </div>
+      {/* Daftar Sheet / Topik */}
+      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-bold text-slate-800">
+            Daftar Sheet Topik (min. 10 soal per topik)
+          </span>
+          <span className="text-[11px] font-mono font-bold text-amber-900">
+            {adminTopics.length > 0 ? `${activeCount}/${adminTopics.length} tampil` : '0 topik'}
+          </span>
+        </div>
 
-            <div className="space-y-1 pt-0.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-800">
-                  Apps Script Bank Soal (Opsional — untuk gambar dalam sel via JSON):
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onCopyText(APPS_SCRIPT_TEMPLATE, 'GAS_CODE')}
-                  className="px-2 py-1 rounded-md bg-amber-100 hover:bg-amber-200 text-[11px] font-bold text-amber-900 flex items-center gap-1 cursor-pointer transition-colors"
+        {adminTopics.length > 0 ? (
+          <div className="space-y-1.5">
+            {adminTopics.map((topic) => {
+              const isPreviewOpen = previewTopic?.sheetKey === topic.sheetKey;
+              const isToggling = togglingSheetKey === topic.sheetKey;
+
+              return (
+                <div
+                  key={topic.sheetKey}
+                  className={`flex items-center justify-between gap-2 px-2.5 py-2 border rounded-lg text-[11px] transition-colors ${
+                    topic.disabled
+                      ? 'bg-slate-100 border-slate-200 opacity-75'
+                      : topic.meetsMinQuestions
+                      ? 'bg-white border-slate-200'
+                      : 'bg-amber-50/80 border-amber-200'
+                  }`}
                 >
-                  {copiedCode === 'GAS_CODE' ? (
-                    <Check className="w-3 h-3 text-emerald-600" />
-                  ) : (
-                    <Copy className="w-3 h-3" />
-                  )}
-                  <span>{copiedCode === 'GAS_CODE' ? 'Tersalin' : 'Salin Kode'}</span>
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-500">
-                Buka <strong>Ekstensi → Apps Script</strong>, tempel kode di bawah, lalu{' '}
-                <strong>Terapkan → Aplikasi web → Siapa saja</strong>.
-              </p>
-              <pre className="p-2.5 bg-slate-900 text-slate-100 rounded-lg text-[10px] leading-relaxed overflow-x-auto max-h-44">
-                {APPS_SCRIPT_TEMPLATE}
-              </pre>
-            </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-slate-900 truncate">
+                      {topic.nama}: {topic.judul}
+                    </div>
+                    <div
+                      className={`text-[10px] mt-0.5 font-medium ${
+                        topic.disabled
+                          ? 'text-slate-500'
+                          : topic.meetsMinQuestions
+                          ? 'text-emerald-700'
+                          : 'text-amber-700'
+                      }`}
+                    >
+                      {topic.disabled
+                        ? `${topic.questionCount} soal · Nonaktif`
+                        : topic.meetsMinQuestions
+                        ? `${topic.questionCount} soal · Tampil di kuis`
+                        : `${topic.questionCount}/10 soal · Butuh min. 10 soal`}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewSheetKey((curr) =>
+                          curr === topic.sheetKey ? null : topic.sheetKey
+                        )
+                      }
+                      className={`px-2.5 py-1 rounded-md border text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                        isPreviewOpen
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>{isPreviewOpen ? 'Tutup' : 'Preview'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={!topic.disabled}
+                      aria-label={`Aktifkan topik ${topic.judul}`}
+                      disabled={isBusy || isToggling}
+                      onClick={() => onToggleSheetDisabled(topic.sheetKey, !topic.disabled)}
+                      className={`px-2.5 py-1 rounded-md border text-[10px] font-bold cursor-pointer transition-colors disabled:opacity-50 ${
+                        topic.disabled
+                          ? 'bg-white hover:bg-slate-100 text-slate-600 border-slate-300'
+                          : 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-700'
+                      }`}
+                    >
+                      {isToggling ? '...' : topic.disabled ? 'Nonaktif' : 'Aktif'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="p-4 bg-white border border-dashed border-slate-300 rounded-lg text-center space-y-2">
+            <p className="text-[11px] text-slate-600">
+              Belum ada sheet soal terbaca. Atur link Google Spreadsheet melalui menu Konfigurasi.
+            </p>
+            <button
+              type="button"
+              onClick={onOpenConfig}
+              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Settings className="w-3.5 h-3.5" />
+              <span>Buka Konfigurasi Spreadsheet</span>
+            </button>
           </div>
         )}
       </div>
+
+      {/* Preview Soal Terpilih */}
+      {previewTopic && (
+        <div className="p-3 bg-white border border-slate-300 rounded-xl space-y-2.5">
+          <div className="flex items-start justify-between gap-2 pb-2 border-b border-slate-200">
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-slate-900 truncate">
+                Preview: {previewTopic.nama} — {previewTopic.judul}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                {previewTopic.questionCount} soal
+                {previewTopic.disabled
+                  ? ' · Dinonaktifkan admin'
+                  : !previewTopic.meetsMinQuestions
+                  ? ` · Tambah ${10 - previewTopic.questionCount} soal lagi agar tampil di kuis`
+                  : ' · Siap dimainkan'}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPreviewSheetKey(null)}
+              className="p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer shrink-0"
+              aria-label="Tutup preview"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+            {previewTopic.soal.map((q, qIdx) => {
+              const imgKey = `${previewTopic.sheetKey}:${q.kode}:${qIdx}`;
+              const imgBroken = !!brokenImages[imgKey];
+
+              return (
+                <div
+                  key={imgKey}
+                  className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5 text-[11px]"
+                >
+                  <div className="flex items-start gap-2">
+                    <span className="font-mono font-bold text-slate-500 shrink-0">
+                      {qIdx + 1}. [{q.kode}]
+                    </span>
+                    <p className="font-semibold text-slate-900 leading-snug">{q.pertanyaan}</p>
+                  </div>
+
+                  {q.gambar && !imgBroken && (
+                    <div className="pt-1">
+                      <img
+                        src={q.gambar}
+                        alt={`Gambar ${q.kode}`}
+                        onError={() => setBrokenImages((prev) => ({ ...prev, [imgKey]: true }))}
+                        className="max-h-32 rounded-md border border-slate-200 bg-white object-contain"
+                      />
+                    </div>
+                  )}
+                  {q.gambar && imgBroken && (
+                    <p className="text-[10px] text-rose-600">Gambar gagal dimuat.</p>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 pt-1">
+                    {q.pilihan.map((opt, optIdx) => {
+                      const isCorrect = optIdx === q.jawabanBenar;
+                      return (
+                        <div
+                          key={optIdx}
+                          className={`px-2 py-1 rounded border flex items-center justify-between gap-1.5 ${
+                            isCorrect
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold'
+                              : 'bg-white border-slate-200 text-slate-700'
+                          }`}
+                        >
+                          <span className="truncate">
+                            {OPTION_LETTERS[optIdx]}. {opt}
+                          </span>
+                          {isCorrect && <Check className="w-3 h-3 text-emerald-600 shrink-0" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { TopicPackage } from '../types/quiz';
+import { RawQuestion, TopicPackage } from '../types/quiz';
 import { requestJson } from '../lib/httpClient';
 import { TeacherQuizRecord } from '../utils/storage';
 
@@ -22,11 +22,26 @@ export interface SpreadsheetConfig {
   appsScriptUrl: string;
   deploymentId: string;
   sheetNames: string[];
+  disabledSheets?: string[];
   enabled: boolean;
+}
+
+export interface AdminTopicItem {
+  id: number;
+  sheetKey: string;
+  sheetName: string;
+  nama: string;
+  judul: string;
+  questionCount: number;
+  meetsMinQuestions: boolean;
+  disabled: boolean;
+  activeForPlayers: boolean;
+  soal: RawQuestion[];
 }
 
 export interface LiveTopicsResponse {
   topics: Record<number, TopicPackage>;
+  adminTopics?: AdminTopicItem[];
   source: 'spreadsheet' | 'apps_script' | 'unconfigured';
   lastSyncedAt: string;
   sheetTopicsCount: number;
@@ -95,10 +110,42 @@ export async function checkSessionToken(
   }
 }
 
+export async function reserveSoloToken(payload: {
+  token: string;
+  holderKey: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    await requestJson('/api/tokens/reserve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, mode: 'SOLO' }),
+    });
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || 'Token gagal digunakan.' };
+  }
+}
+
+export async function releaseSoloToken(payload: {
+  token: string;
+  holderKey: string;
+}): Promise<void> {
+  try {
+    await requestJson('/api/tokens/release', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // ignore release errors
+  }
+}
+
 export async function consumeSoloToken(payload: {
   token: string;
   name: string;
   institution: string;
+  holderKey?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
     await requestJson('/api/tokens/consume', {
@@ -186,11 +233,14 @@ export async function clearAdminTokens(
   return data.tokens || [];
 }
 
-export async function fetchSpreadsheetConfig(pin: string): Promise<SpreadsheetConfig> {
-  const data = await requestJson<{ config: SpreadsheetConfig }>('/api/admin/spreadsheet', {
+export function fetchAdminSpreadsheetState(pin: string): Promise<{
+  config: SpreadsheetConfig;
+  adminTopics: AdminTopicItem[];
+  liveTopics: LiveTopicsResponse;
+}> {
+  return requestJson('/api/admin/spreadsheet', {
     headers: { 'x-admin-pin': pin },
   });
-  return data.config;
 }
 
 export interface ParticipantSheetConfig {
@@ -270,6 +320,7 @@ export function updateSpreadsheetConfig(
 ): Promise<{
   ok: boolean;
   config: SpreadsheetConfig;
+  adminTopics?: AdminTopicItem[];
   liveTopics: LiveTopicsResponse;
   syncResult: {
     source: 'spreadsheet' | 'apps_script' | 'unconfigured';

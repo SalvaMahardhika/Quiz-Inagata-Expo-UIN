@@ -4,6 +4,25 @@ import type { SessionToken, TokenMode } from '../types.ts';
 
 let tokenStore: SessionToken[] = readJsonFile<SessionToken[]>(TOKENS_FILE, []);
 
+interface TokenReservation {
+  holderKey: string;
+  mode: 'SOLO' | 'MULTIPLAYER';
+  expiresAt: number;
+}
+
+const RESERVATION_TTL_MS = 20 * 60 * 1000;
+const reservedTokens = new Map<string, TokenReservation>();
+
+function getActiveReservation(code: string): TokenReservation | null {
+  const entry = reservedTokens.get(code);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    reservedTokens.delete(code);
+    return null;
+  }
+  return entry;
+}
+
 export function normalizeTokenCode(raw: unknown): string {
   return String(raw || '')
     .trim()
@@ -17,7 +36,8 @@ export function listTokens(): SessionToken[] {
 
 export function validateTokenAvailability(
   rawCode: unknown,
-  requestedMode: 'SOLO' | 'MULTIPLAYER'
+  requestedMode: 'SOLO' | 'MULTIPLAYER',
+  holderKey?: string
 ): { ok: true; token: SessionToken } | { ok: false; message: string } {
   const code = normalizeTokenCode(rawCode);
   if (!code) {
@@ -36,6 +56,14 @@ export function validateTokenAvailability(
     };
   }
 
+  const activeRes = getActiveReservation(code);
+  if (activeRes && (!holderKey || activeRes.holderKey !== holderKey)) {
+    return {
+      ok: false,
+      message: `Token ${code} sedang aktif digunakan di sesi lain.`,
+    };
+  }
+
   if (found.mode !== 'ALL' && found.mode !== requestedMode) {
     const modeLabel = found.mode === 'SOLO' ? 'Mode Solo' : 'Mode Kelompok';
     return {
@@ -47,19 +75,64 @@ export function validateTokenAvailability(
   return { ok: true, token: found };
 }
 
+export function reserveSessionToken(
+  rawCode: unknown,
+  requestedMode: 'SOLO' | 'MULTIPLAYER',
+  holderKey: string
+): { ok: true; token: SessionToken } | { ok: false; message: string } {
+  const code = normalizeTokenCode(rawCode);
+  const check = validateTokenAvailability(code, requestedMode, holderKey);
+  if (!check.ok) return check;
+
+  reservedTokens.set(code, {
+    holderKey,
+    mode: requestedMode,
+    expiresAt: Date.now() + RESERVATION_TTL_MS,
+  });
+  return { ok: true, token: check.token };
+}
+
+export function releaseSessionTokenReservation(rawCode: unknown, holderKey?: string): void {
+  const code = normalizeTokenCode(rawCode);
+  if (!code) return;
+  const active = reservedTokens.get(code);
+  if (!active) return;
+  if (!holderKey || active.holderKey === holderKey) {
+    reservedTokens.delete(code);
+  }
+}
+
 export function consumeSessionToken(
   rawCode: unknown,
   requestedMode: 'SOLO' | 'MULTIPLAYER',
   usedBy: string,
   usedInstitution: string,
-  roomCode?: string
+  roomCode?: string,
+  holderKey?: string
 ): { ok: true; token: SessionToken } | { ok: false; message: string } {
-  const check = validateTokenAvailability(rawCode, requestedMode);
+  const code = normalizeTokenCode(rawCode);
+  const existing = tokenStore.find((t) => t.code === code);
+  const cleanUser = usedBy.trim() || 'Peserta';
+
+  // Idempotent: jika token sudah ditandai terpakai oleh sesi yang sama, tetap sukses
+  if (
+    existing &&
+    existing.status === 'USED' &&
+    existing.usedMode === requestedMode &&
+    ((roomCode && existing.roomCode === roomCode) ||
+      (!roomCode && (existing.usedBy || '') === cleanUser))
+  ) {
+    reservedTokens.delete(code);
+    return { ok: true, token: existing };
+  }
+
+  const check = validateTokenAvailability(code, requestedMode, holderKey);
   if (!check.ok) return check;
 
+  reservedTokens.delete(code);
   check.token.status = 'USED';
   check.token.usedAt = new Date().toISOString();
-  check.token.usedBy = usedBy.trim() || 'Peserta';
+  check.token.usedBy = cleanUser;
   check.token.usedInstitution = usedInstitution.trim() || '-';
   check.token.usedMode = requestedMode;
   if (roomCode) {

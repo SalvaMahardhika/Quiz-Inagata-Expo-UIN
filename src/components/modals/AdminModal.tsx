@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { X, KeyRound, FileSpreadsheet, Trophy, Users } from 'lucide-react';
+import { X, KeyRound, FileSpreadsheet, Trophy, Settings } from 'lucide-react';
 import { exportRecordsToCSV } from '../../services/csvExportService';
 import {
   verifyAdminPin,
@@ -9,13 +9,13 @@ import {
   generateAdminTokens,
   deleteAdminToken,
   clearAdminTokens,
-  fetchSpreadsheetConfig,
+  fetchAdminSpreadsheetState,
   updateSpreadsheetConfig,
   fetchParticipantSheetConfig,
   updateParticipantSheetConfig,
   testParticipantSheetConfig,
-  fetchLiveTopics,
   refreshLiveTopicsAdmin,
+  AdminTopicItem,
   SessionToken,
   TokenMode,
   SpreadsheetConfig,
@@ -25,8 +25,8 @@ import {
 import { playClickSound } from '../../utils/audio';
 import { AdminLoginForm } from '../admin/AdminLoginForm';
 import { AdminTokensTab } from '../admin/AdminTokensTab';
-import { AdminSpreadsheetTab, DetectedSheetItem } from '../admin/AdminSpreadsheetTab';
-import { AdminParticipantSheetTab } from '../admin/AdminParticipantSheetTab';
+import { AdminSpreadsheetTab } from '../admin/AdminSpreadsheetTab';
+import { AdminConfigTab } from '../admin/AdminConfigTab';
 import { AdminLeaderboardTab } from '../admin/AdminLeaderboardTab';
 
 interface AdminModalProps {
@@ -36,7 +36,7 @@ interface AdminModalProps {
   onTopicsUpdated?: (data: LiveTopicsResponse) => void;
 }
 
-type AdminTab = 'TOKENS' | 'SPREADSHEET' | 'PARTICIPANTS' | 'LEADERBOARD';
+type AdminTab = 'TOKENS' | 'SPREADSHEET' | 'LEADERBOARD' | 'CONFIG';
 
 export const AdminModal: React.FC<AdminModalProps> = ({
   isOpen,
@@ -63,9 +63,11 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     appsScriptUrl: '',
     deploymentId: '',
     sheetNames: [],
+    disabledSheets: [],
     enabled: true,
   });
-  const [detectedSheets, setDetectedSheets] = useState<DetectedSheetItem[]>([]);
+  const [adminTopics, setAdminTopics] = useState<AdminTopicItem[]>([]);
+  const [togglingSheetKey, setTogglingSheetKey] = useState<string | null>(null);
   const [syncInfo, setSyncInfo] = useState<{
     source: string;
     lastSyncedAt: string;
@@ -93,14 +95,15 @@ export const AdminModal: React.FC<AdminModalProps> = ({
   const [totalServerRecords, setTotalServerRecords] = useState(0);
   const [isRecordBusy, setIsRecordBusy] = useState(false);
 
-  const applyLiveTopicsPreview = (live: LiveTopicsResponse) => {
-    const list: DetectedSheetItem[] = Object.values(live.topics || {}).map((t) => ({
-      id: t.id,
-      nama: t.nama,
-      judul: t.judul,
-      questionCount: Array.isArray(t.soal) ? t.soal.length : 0,
-    }));
-    setDetectedSheets(list);
+  const applyLiveTopicsPreview = (
+    live: LiveTopicsResponse,
+    adminList?: AdminTopicItem[]
+  ) => {
+    if (Array.isArray(adminList)) {
+      setAdminTopics(adminList);
+    } else if (Array.isArray(live.adminTopics)) {
+      setAdminTopics(live.adminTopics);
+    }
     setSyncInfo({
       source: live.source,
       lastSyncedAt: live.lastSyncedAt,
@@ -126,18 +129,17 @@ export const AdminModal: React.FC<AdminModalProps> = ({
 
   const loadAllAdminData = useCallback(async (pin: string) => {
     try {
-      const [tokenList, recData, cfg, pCfg, live] = await Promise.all([
+      const [tokenList, recData, sheetState, pCfg] = await Promise.all([
         fetchAdminTokens(pin),
         fetchAdminRecords(pin),
-        fetchSpreadsheetConfig(pin),
+        fetchAdminSpreadsheetState(pin),
         fetchParticipantSheetConfig(pin),
-        fetchLiveTopics(false),
       ]);
       setTokens(tokenList);
       setTotalServerRecords(recData.totalCount);
-      setSheetConfig(cfg);
+      setSheetConfig(sheetState.config);
       setParticipantConfig(pCfg);
-      applyLiveTopicsPreview(live);
+      applyLiveTopicsPreview(sheetState.liveTopics, sheetState.adminTopics);
     } catch (err: any) {
       flashError(err?.message || 'Gagal memuat data admin.');
     }
@@ -148,6 +150,40 @@ export const AdminModal: React.FC<AdminModalProps> = ({
       loadAllAdminData(activePin);
     }
   }, [isOpen, isAuthenticated, activePin, loadAllAdminData]);
+
+  useEffect(() => {
+    if (!isOpen || !isAuthenticated || !activePin) return;
+
+    const refreshLiveAdminStats = () => {
+      fetchAdminTokens(activePin)
+        .then(setTokens)
+        .catch(() => {});
+      fetchAdminRecords(activePin)
+        .then((recData) => setTotalServerRecords(recData.totalCount))
+        .catch(() => {});
+    };
+
+    if (activeTab === 'TOKENS' || activeTab === 'LEADERBOARD') {
+      refreshLiveAdminStats();
+    }
+
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshLiveAdminStats();
+      }
+    };
+
+    window.addEventListener('focus', refreshLiveAdminStats);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+    const intervalId =
+      activeTab === 'TOKENS' ? setInterval(refreshLiveAdminStats, 4000) : undefined;
+
+    return () => {
+      window.removeEventListener('focus', refreshLiveAdminStats);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isOpen, isAuthenticated, activePin, activeTab]);
 
   if (!isOpen) return null;
 
@@ -232,30 +268,36 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     flashSuccess(`${unused.length} token disalin.`);
   };
 
-  const handleSaveAndSyncSheet = async (e: React.FormEvent) => {
+  const handleSaveAllConfigs = async (e: React.FormEvent) => {
     e.preventDefault();
     playClickSound();
     setIsSheetBusy(true);
+    setParticipantTestStatus(null);
     try {
-      const res = await updateSpreadsheetConfig(activePin, {
-        ...sheetConfig,
-        sheetNames: [],
-      });
-      setSheetConfig(res.config);
+      const [sheetRes, partRes] = await Promise.all([
+        updateSpreadsheetConfig(activePin, {
+          ...sheetConfig,
+          sheetNames: [],
+        }),
+        updateParticipantSheetConfig(activePin, participantConfig),
+      ]);
 
-      const freshTopics = res.liveTopics || (await refreshLiveTopicsAdmin(activePin));
-      applyLiveTopicsPreview(freshTopics);
+      setSheetConfig(sheetRes.config);
+      setParticipantConfig(partRes.config);
+
+      const freshTopics = sheetRes.liveTopics || (await refreshLiveTopicsAdmin(activePin));
+      applyLiveTopicsPreview(freshTopics, sheetRes.adminTopics);
       if (onTopicsUpdated) onTopicsUpdated(freshTopics);
 
-      if (freshTopics.warning) {
+      if (freshTopics.warning && (!sheetRes.adminTopics || sheetRes.adminTopics.length === 0)) {
         flashError(freshTopics.warning);
       } else {
         flashSuccess(
-          `Tersinkron: ${freshTopics.sheetTopicsCount} topik, ${freshTopics.totalLiveQuestions} soal.`
+          `Konfigurasi tersimpan (${freshTopics.sheetTopicsCount} topik tampil, ${freshTopics.totalLiveQuestions} soal).`
         );
       }
     } catch (err: any) {
-      flashError(err?.message || 'Gagal menyimpan pengaturan.');
+      flashError(err?.message || 'Gagal menyimpan konfigurasi spreadsheet.');
     } finally {
       setIsSheetBusy(false);
     }
@@ -272,7 +314,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         flashError(freshTopics.warning);
       } else {
         flashSuccess(
-          `Diperbarui: ${freshTopics.sheetTopicsCount} topik, ${freshTopics.totalLiveQuestions} soal.`
+          `Diperbarui: ${freshTopics.sheetTopicsCount} topik tampil, ${freshTopics.totalLiveQuestions} soal.`
         );
       }
     } catch (err: any) {
@@ -282,25 +324,43 @@ export const AdminModal: React.FC<AdminModalProps> = ({
     }
   };
 
-  const handleSaveParticipantSheet = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleToggleSheetDisabled = async (sheetKey: string, nextDisabled: boolean) => {
     playClickSound();
-    setIsParticipantBusy(true);
-    setParticipantTestStatus(null);
+    setTogglingSheetKey(sheetKey);
     try {
-      const res = await updateParticipantSheetConfig(activePin, participantConfig);
-      setParticipantConfig(res.config);
-      const msg = 'Pengaturan peserta disimpan.';
-      setParticipantTestStatus({ ok: true, message: msg });
-      flashSuccess(msg);
+      const prevDisabled = Array.isArray(sheetConfig.disabledSheets)
+        ? sheetConfig.disabledSheets
+        : [];
+      const nextDisabledSheets = nextDisabled
+        ? Array.from(new Set([...prevDisabled, sheetKey]))
+        : prevDisabled.filter((k) => k !== sheetKey);
+
+      const res = await updateSpreadsheetConfig(activePin, {
+        ...sheetConfig,
+        disabledSheets: nextDisabledSheets,
+      });
+      setSheetConfig(res.config);
+      applyLiveTopicsPreview(res.liveTopics, res.adminTopics);
+      if (onTopicsUpdated) onTopicsUpdated(res.liveTopics);
+
+      const targetTopic = (res.adminTopics || []).find((t) => t.sheetKey === sheetKey);
+      if (nextDisabled) {
+        flashSuccess(`Topik "${targetTopic?.judul || sheetKey}" dinonaktifkan.`);
+      } else if (targetTopic && !targetTopic.meetsMinQuestions) {
+        flashSuccess(
+          `Topik diaktifkan (${targetTopic.questionCount}/10 soal — butuh min. 10 soal untuk tampil).`
+        );
+      } else {
+        flashSuccess(`Topik "${targetTopic?.judul || sheetKey}" diaktifkan.`);
+      }
     } catch (err: any) {
-      const msg = err?.message || 'Gagal menyimpan pengaturan.';
-      setParticipantTestStatus({ ok: false, message: msg });
-      flashError(msg);
+      flashError(err?.message || 'Gagal mengubah status topik.');
     } finally {
-      setIsParticipantBusy(false);
+      setTogglingSheetKey(null);
     }
   };
+
+
 
   const handleTestParticipantSheet = async () => {
     playClickSound();
@@ -416,66 +476,69 @@ export const AdminModal: React.FC<AdminModalProps> = ({
         </div>
 
         {isAuthenticated && (
-          <div className="px-4 sm:px-5 pt-2.5 pb-0 border-b border-slate-200 flex gap-1.5 overflow-x-auto shrink-0 bg-white">
+          <div className="px-4 sm:px-5 pt-2.5 pb-0 border-b border-slate-200 flex items-center justify-between gap-2 overflow-x-auto shrink-0 bg-white">
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setActiveTab('TOKENS');
+                }}
+                className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'TOKENS'
+                    ? 'border-amber-500 text-amber-900 bg-amber-50/50 rounded-t-lg'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Token ({unusedCount})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setActiveTab('SPREADSHEET');
+                }}
+                className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'SPREADSHEET'
+                    ? 'border-amber-500 text-amber-900 bg-amber-50/50 rounded-t-lg'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Bank Soal</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  playClickSound();
+                  setActiveTab('LEADERBOARD');
+                }}
+                className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'LEADERBOARD'
+                    ? 'border-amber-500 text-amber-900 bg-amber-50/50 rounded-t-lg'
+                    : 'border-transparent text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <Trophy className="w-3.5 h-3.5" />
+                <span>Papan Skor ({totalServerRecords})</span>
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => {
                 playClickSound();
-                setActiveTab('TOKENS');
+                setActiveTab('CONFIG');
               }}
-              className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                activeTab === 'TOKENS'
-                  ? 'border-amber-500 text-amber-900 bg-amber-50/50 rounded-t-lg'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
+              className={`mb-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer shrink-0 ${
+                activeTab === 'CONFIG'
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
               }`}
             >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>Token ({unusedCount})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                playClickSound();
-                setActiveTab('SPREADSHEET');
-              }}
-              className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                activeTab === 'SPREADSHEET'
-                  ? 'border-amber-500 text-amber-900 bg-amber-50/50 rounded-t-lg'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              <span>Bank Soal</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                playClickSound();
-                setActiveTab('PARTICIPANTS');
-              }}
-              className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                activeTab === 'PARTICIPANTS'
-                  ? 'border-emerald-500 text-emerald-900 bg-emerald-50/50 rounded-t-lg'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Users className="w-3.5 h-3.5" />
-              <span>Peserta</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                playClickSound();
-                setActiveTab('LEADERBOARD');
-              }}
-              className={`px-3 py-2 text-xs font-bold border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                activeTab === 'LEADERBOARD'
-                  ? 'border-amber-500 text-amber-900 bg-amber-50/50 rounded-t-lg'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Trophy className="w-3.5 h-3.5" />
-              <span>Papan Skor ({totalServerRecords})</span>
+              <Settings className="w-3.5 h-3.5" />
+              <span>Konfigurasi</span>
             </button>
           </div>
         )}
@@ -536,25 +599,33 @@ export const AdminModal: React.FC<AdminModalProps> = ({
             />
           ) : activeTab === 'SPREADSHEET' ? (
             <AdminSpreadsheetTab
-              config={sheetConfig}
-              detectedSheets={detectedSheets}
+              adminTopics={adminTopics}
+              togglingSheetKey={togglingSheetKey}
               syncInfo={syncInfo}
               isBusy={isSheetBusy}
-              copiedCode={copiedCode}
-              onChangeConfig={setSheetConfig}
-              onSaveAndSync={handleSaveAndSyncSheet}
               onForceRefresh={handleForceRefreshTopics}
-              onCopyText={handleCopyText}
+              onToggleSheetDisabled={handleToggleSheetDisabled}
+              onOpenConfig={() => {
+                playClickSound();
+                setActiveTab('CONFIG');
+              }}
             />
-          ) : activeTab === 'PARTICIPANTS' ? (
-            <AdminParticipantSheetTab
-              config={participantConfig}
-              isBusy={isParticipantBusy}
-              testStatus={participantTestStatus}
+          ) : activeTab === 'CONFIG' ? (
+            <AdminConfigTab
+              sheetConfig={sheetConfig}
+              participantConfig={participantConfig}
+              isSaving={isSheetBusy}
+              isParticipantTesting={isParticipantBusy}
+              participantTestStatus={participantTestStatus}
               copiedCode={copiedCode}
-              onChangeConfig={setParticipantConfig}
-              onSaveConfig={handleSaveParticipantSheet}
-              onTestSend={handleTestParticipantSheet}
+              onChangeSheetConfig={setSheetConfig}
+              onChangeParticipantConfig={setParticipantConfig}
+              onSaveAllConfigs={handleSaveAllConfigs}
+              onTestParticipantSend={handleTestParticipantSheet}
+              onBackToBankSoal={() => {
+                playClickSound();
+                setActiveTab('SPREADSHEET');
+              }}
               onCopyText={handleCopyText}
             />
           ) : (

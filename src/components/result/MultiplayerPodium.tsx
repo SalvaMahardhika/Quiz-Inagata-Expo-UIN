@@ -9,7 +9,7 @@ interface MultiplayerPodiumProps {
   currentPlayerName: string;
   currentScore: number;
   theme: ThemeConfig;
-  onFinish: () => void;
+  onFinish: () => Promise<void> | void;
 }
 
 export const MultiplayerPodium: React.FC<MultiplayerPodiumProps> = ({
@@ -20,6 +20,17 @@ export const MultiplayerPodium: React.FC<MultiplayerPodiumProps> = ({
   theme,
   onFinish,
 }) => {
+  const [isExiting, setIsExiting] = React.useState(false);
+
+  const handleExit = async () => {
+    if (isExiting) return;
+    setIsExiting(true);
+    try {
+      await onFinish();
+    } finally {
+      setIsExiting(false);
+    }
+  };
   return (
     <div
       className={`w-full max-w-md ${theme.cardBg} rounded-2xl p-4 sm:p-6 border-2 ${theme.cardBorder} shadow-xl animate-pop text-center`}
@@ -145,10 +156,11 @@ export const MultiplayerPodium: React.FC<MultiplayerPodiumProps> = ({
 
       <button
         type="button"
-        onClick={onFinish}
-        className="btn-kahoot w-full h-11 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs border-b-4 border-slate-950 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none"
+        disabled={isExiting}
+        onClick={handleExit}
+        className="btn-kahoot w-full h-11 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs border-b-4 border-slate-950 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none disabled:opacity-60"
       >
-        <span>KEMBALI KE MENU UTAMA</span>
+        <span>{isExiting ? 'KEMBALI...' : 'KEMBALI'}</span>
       </button>
     </div>
   );

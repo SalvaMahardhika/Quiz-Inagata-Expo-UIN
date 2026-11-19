@@ -15,6 +15,8 @@ import {
 import {
   fetchLiveTopics,
   checkSessionToken,
+  reserveSoloToken,
+  releaseSoloToken,
   consumeSoloToken,
   submitGlobalLeaderboardRecord,
   LiveTopicsResponse,
@@ -38,6 +40,7 @@ export function useQuizSession() {
   const [cachedMultiplayerRoster, setCachedMultiplayerRoster] = useState<MultiPlayerItem[]>([]);
   const hasLoggedMpFinishRef = useRef(false);
   const hasLoggedSoloFinishRef = useRef(false);
+  const soloHolderKeyRef = useRef<string>('');
   const [randomizedMpQuestions, setRandomizedMpQuestions] = useState<PreparedTeacherQuestion[]>([]);
 
   const [currentScreen, setCurrentScreen] = useState<ScreenState>('REGISTRATION');
@@ -196,6 +199,15 @@ export function useQuizSession() {
           detail: `Selesai Solo (${latestCorrect}/${soloQuestions.length} benar)`,
         });
 
+        if (sessionTokenInput.trim()) {
+          consumeSoloToken({
+            token: sessionTokenInput.trim(),
+            name: name.trim(),
+            institution: institution.trim(),
+            holderKey: soloHolderKeyRef.current,
+          }).catch(() => {});
+        }
+
         setCurrentScreen('RESULT');
       }
     },
@@ -206,6 +218,7 @@ export function useQuizSession() {
       name,
       institution,
       phone,
+      sessionTokenInput,
       score,
       correctAnswersCount,
     ]
@@ -260,6 +273,7 @@ export function useQuizSession() {
   // Confetti & Spreadsheet logging Multiplayer finish
   useEffect(() => {
     if (playMode === 'MULTIPLAYER' && mp.gameStatus === 'FINISHED') {
+      setCurrentScreen('RESULT');
       if (!hasLoggedMpFinishRef.current) {
         hasLoggedMpFinishRef.current = true;
         const myRosterEntry =
@@ -401,17 +415,18 @@ export function useQuizSession() {
     playClickSound();
     setIsCheckingToken(true);
     try {
-      const consumed = await consumeSoloToken({
+      const holderKey = `SOLO_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const reserved = await reserveSoloToken({
         token: sessionTokenInput.trim(),
-        name: name.trim(),
-        institution: institution.trim(),
+        holderKey,
       });
-      if (!consumed.ok) {
-        setFormError(consumed.error || 'Token sesi sudah terpakai atau tidak valid.');
+      if (!reserved.ok) {
+        setFormError(reserved.error || 'Token sesi sudah terpakai atau tidak valid.');
         setCurrentScreen('REGISTRATION');
         return;
       }
 
+      soloHolderKeyRef.current = holderKey;
       setSelectedTopic(topic);
       hasLoggedSoloFinishRef.current = false;
 
@@ -465,8 +480,24 @@ export function useQuizSession() {
     }
   };
 
-  const handleResetToHome = () => {
+  const handleResetToHome = async () => {
     playClickSound();
+    if (playMode === 'SOLO' && sessionTokenInput.trim()) {
+      if (currentScreen === 'RESULT') {
+        await consumeSoloToken({
+          token: sessionTokenInput.trim(),
+          name: name.trim(),
+          institution: institution.trim(),
+          holderKey: soloHolderKeyRef.current,
+        }).catch(() => {});
+      } else if (soloHolderKeyRef.current) {
+        releaseSoloToken({
+          token: sessionTokenInput.trim(),
+          holderKey: soloHolderKeyRef.current,
+        }).catch(() => {});
+      }
+    }
+    soloHolderKeyRef.current = '';
     isAnswerLockedRef.current = false;
     hasLoggedSoloFinishRef.current = false;
     hasLoggedMpFinishRef.current = false;

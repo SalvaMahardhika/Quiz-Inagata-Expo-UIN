@@ -95,6 +95,20 @@ export default function App() {
               onStartGame={quiz.mp.startRoomGame}
               onLeaveRoom={quiz.handleResetToHome}
             />
+          ) : (quiz.playMode === 'SOLO' && quiz.currentScreen === 'RESULT') ||
+            (quiz.playMode === 'MULTIPLAYER' && quiz.mp.gameStatus === 'FINISHED') ? (
+            <ResultScreen
+              playMode={quiz.playMode}
+              theme={currentTheme}
+              name={quiz.name}
+              institution={quiz.institution}
+              score={quiz.score}
+              correctCount={quiz.correctAnswersCount}
+              totalQuestions={quiz.soloQuestions.length}
+              topicTitle={quiz.mp.topicTitle}
+              finalLeaderboard={quiz.finalLeaderboardDisplay}
+              onFinish={quiz.handleResetToHome}
+            />
           ) : quiz.currentScreen === 'REGISTRATION' && quiz.mp.gameStatus === 'IDLE' ? (
             <RegistrationScreen
               theme={currentTheme}
@@ -145,20 +159,6 @@ export default function App() {
                   quiz.handleSelectSoloTopic(topic);
                 }
               }}
-            />
-          ) : (quiz.playMode === 'SOLO' && quiz.currentScreen === 'RESULT') ||
-            (quiz.playMode === 'MULTIPLAYER' && quiz.mp.gameStatus === 'FINISHED') ? (
-            <ResultScreen
-              playMode={quiz.playMode}
-              theme={currentTheme}
-              name={quiz.name}
-              institution={quiz.institution}
-              score={quiz.score}
-              correctCount={quiz.correctAnswersCount}
-              totalQuestions={quiz.soloQuestions.length}
-              topicTitle={quiz.mp.topicTitle}
-              finalLeaderboard={quiz.finalLeaderboardDisplay}
-              onFinish={quiz.handleResetToHome}
             />
           ) : null}
         </div>

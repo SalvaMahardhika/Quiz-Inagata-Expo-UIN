@@ -81,14 +81,14 @@ export const TopicSelectionScreen: React.FC<TopicSelectionScreenProps> = ({
           }`}
         >
           <FileSpreadsheet className="w-10 h-10 text-amber-500 mx-auto mb-3" />
-          <h3 className="text-base font-bold">Bank Soal Spreadsheet Belum Terhubung</h3>
+          <h3 className="text-base font-bold">Bank Soal Belum Tersedia</h3>
           <p
             className={`text-xs mt-1.5 max-w-md mx-auto leading-relaxed ${
               theme.isDark ? 'text-slate-300' : 'text-slate-600'
             }`}
           >
             {topicWarning ||
-              'Belum ada soal aktif. Silakan masuk ke menu Admin → Live Soal (Sheet) untuk mengunduh template Excel (.xlsx) atau menghubungkan link Google Spreadsheet Anda.'}
+              'Belum ada topik soal aktif (minimal 10 soal per topik). Hubungkan Google Spreadsheet di Panel Admin → Bank Soal.'}
           </p>
         </div>
       ) : (
@@ -138,18 +138,13 @@ export const TopicSelectionScreen: React.FC<TopicSelectionScreenProps> = ({
       <div
         className={`text-center text-[11px] sm:text-xs font-semibold ${
           theme.isDark ? 'text-slate-400' : 'text-slate-500'
-        } pt-1 pb-2 flex items-center justify-center gap-2 flex-wrap`}
+        } pt-1 pb-2`}
       >
         <span>
           {playMode === 'MULTIPLAYER'
             ? 'Pilih topik untuk membuat Room Live dan mengacak 10 soal'
             : 'Pilih satu topik untuk memulai 10 soal acak'}
         </span>
-        {topicSource !== 'unconfigured' && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold">
-            Live Spreadsheet
-          </span>
-        )}
       </div>
     </div>
   );

@@ -13,6 +13,7 @@ export interface RawQuestion {
 
 export interface TopicPackage {
   id: number;
+  sheetName?: string;
   nama: string;
   judul: string;
   ikon: string;

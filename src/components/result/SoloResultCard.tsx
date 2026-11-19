@@ -8,7 +8,7 @@ interface SoloResultCardProps {
   correctCount: number;
   totalQuestions: number;
   theme: ThemeConfig;
-  onFinish: () => void;
+  onFinish: () => Promise<void> | void;
 }
 
 export const SoloResultCard: React.FC<SoloResultCardProps> = ({
@@ -20,6 +20,18 @@ export const SoloResultCard: React.FC<SoloResultCardProps> = ({
   theme,
   onFinish,
 }) => {
+  const [isExiting, setIsExiting] = React.useState(false);
+
+  const handleExit = async () => {
+    if (isExiting) return;
+    setIsExiting(true);
+    try {
+      await onFinish();
+    } finally {
+      setIsExiting(false);
+    }
+  };
+
   return (
     <div
       className={`w-full max-w-sm ${theme.cardBg} rounded-2xl p-5 sm:p-7 border-2 ${theme.cardBorder} text-center shadow-xl animate-pop`}
@@ -62,10 +74,12 @@ export const SoloResultCard: React.FC<SoloResultCardProps> = ({
       </div>
 
       <button
-        onClick={onFinish}
-        className={`btn-kahoot w-full h-12 ${theme.primaryButtonBg} font-extrabold rounded-xl text-sm border-b-4 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none`}
+        type="button"
+        disabled={isExiting}
+        onClick={handleExit}
+        className={`btn-kahoot w-full h-12 ${theme.primaryButtonBg} font-extrabold rounded-xl text-sm border-b-4 shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer select-none disabled:opacity-60`}
       >
-        <span>SELESAI</span>
+        <span>{isExiting ? 'MENYIMPAN...' : 'KELUAR'}</span>
       </button>
     </div>
   );

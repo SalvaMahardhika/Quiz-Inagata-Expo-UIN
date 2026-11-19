@@ -21,6 +21,7 @@ questionsRoutes.post('/refresh', requireAdminPin, async (_req, res) => {
   const result = await getLiveTopics(true);
   res.json({
     topics: result.topics,
+    adminTopics: result.adminTopics,
     source: result.source,
     lastSyncedAt: result.lastSyncedAt,
     sheetTopicsCount: result.sheetTopicsCount,

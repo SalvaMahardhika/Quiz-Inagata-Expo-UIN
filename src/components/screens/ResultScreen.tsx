@@ -15,7 +15,7 @@ interface ResultScreenProps {
   totalQuestions: number;
   topicTitle: string;
   finalLeaderboard: MultiPlayerItem[];
-  onFinish: () => void;
+  onFinish: () => Promise<void> | void;
 }
 
 export const ResultScreen: React.FC<ResultScreenProps> = ({

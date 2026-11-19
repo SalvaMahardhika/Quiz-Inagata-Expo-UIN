@@ -65,16 +65,29 @@ adminRoutes.delete('/tokens', requireAdminPin, (req, res) => {
   res.json({ ok: true, tokens });
 });
 
-adminRoutes.get('/spreadsheet', requireAdminPin, (_req, res) => {
-  res.json({ config: getSpreadsheetConfig() });
+adminRoutes.get('/spreadsheet', requireAdminPin, async (_req, res) => {
+  const live = await getLiveTopics(false);
+  res.json({
+    config: getSpreadsheetConfig(),
+    adminTopics: live.adminTopics,
+    liveTopics: {
+      topics: live.topics,
+      source: live.source,
+      lastSyncedAt: live.lastSyncedAt,
+      sheetTopicsCount: live.sheetTopicsCount,
+      totalLiveQuestions: live.totalLiveQuestions,
+      warning: live.warning,
+    },
+  });
 });
 
 adminRoutes.put('/spreadsheet', requireAdminPin, async (req, res) => {
-  const config = updateSpreadsheetConfigState(req.body || {});
-  const live = await getLiveTopics(true);
+  const { config, connectionChanged } = updateSpreadsheetConfigState(req.body || {});
+  const live = await getLiveTopics(connectionChanged);
   res.json({
     ok: true,
     config,
+    adminTopics: live.adminTopics,
     liveTopics: {
       topics: live.topics,
       source: live.source,
