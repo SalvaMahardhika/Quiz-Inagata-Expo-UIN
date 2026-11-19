@@ -1,6 +1,6 @@
 {
-  "name": "Kuis Juara Pintar SD - Expo UIN",
-  "description": "Aplikasi kuis interaktif untuk Expo di Kampus UIN",
+  "name": "quiz inagata",
+  "description": "Aplikasi kuis interaktif",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
