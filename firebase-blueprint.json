@@ -1,0 +1,251 @@
+{
+  "entities": {
+    "SpreadsheetConfig": {
+      "title": "SpreadsheetConfig",
+      "description": "Konfigurasi Google Spreadsheet dan Apps Script untuk bank soal kuis.",
+      "type": "object",
+      "properties": {
+        "spreadsheetUrlOrId": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "URL atau ID Google Spreadsheet bank soal."
+        },
+        "appsScriptUrl": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "URL Web App Google Apps Script bank soal."
+        },
+        "deploymentId": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Deployment ID Apps Script bank soal."
+        },
+        "sheetNames": {
+          "type": "array",
+          "description": "Daftar nama sheet topik opsional."
+        },
+        "disabledSheets": {
+          "type": "array",
+          "description": "Daftar sheet topik yang dinonaktifkan."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Status aktif integrasi bank soal."
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Waktu pembaruan terakhir ISO-8601."
+        }
+      },
+      "required": [
+        "spreadsheetUrlOrId",
+        "appsScriptUrl",
+        "deploymentId",
+        "sheetNames",
+        "disabledSheets",
+        "enabled",
+        "updatedAt"
+      ]
+    },
+    "ParticipantSheetConfig": {
+      "title": "ParticipantSheetConfig",
+      "description": "Konfigurasi Google Spreadsheet dan Apps Script untuk pencatatan peserta.",
+      "type": "object",
+      "properties": {
+        "spreadsheetUrl": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "URL atau ID Google Spreadsheet peserta."
+        },
+        "appsScriptUrl": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "URL Web App Google Apps Script peserta."
+        },
+        "deploymentId": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Deployment ID Apps Script peserta."
+        },
+        "sheetName": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Nama tab sheet tujuan pencatatan peserta."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Status aktif pencatatan peserta."
+        },
+        "updatedAt": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Waktu pembaruan terakhir ISO-8601."
+        }
+      },
+      "required": [
+        "spreadsheetUrl",
+        "appsScriptUrl",
+        "deploymentId",
+        "sheetName",
+        "enabled",
+        "updatedAt"
+      ]
+    },
+    "SessionToken": {
+      "title": "SessionToken",
+      "description": "Token sekali pakai untuk memulai sesi Solo maupun Kelompok.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16,
+          "pattern": "^[A-Z0-9]+$",
+          "description": "Kode token alfanumerik huruf besar."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["ALL", "SOLO", "MULTIPLAYER"],
+          "description": "Mode sesi yang diperbolehkan untuk token ini."
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Label catatan token dari Admin."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["UNUSED", "USED"],
+          "description": "Status pemakaian token."
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Waktu pembuatan token ISO-8601."
+        },
+        "usedAt": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Waktu penggunaan token ISO-8601."
+        },
+        "usedBy": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Nama pengguna yang memakai token."
+        },
+        "usedInstitution": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Asal instansi pemakai token."
+        },
+        "usedMode": {
+          "type": "string",
+          "enum": ["SOLO", "MULTIPLAYER"],
+          "description": "Mode sesi saat token digunakan."
+        },
+        "roomCode": {
+          "type": "string",
+          "maxLength": 16,
+          "description": "Kode room kelompok bila dipakai pada mode Multiplayer."
+        }
+      },
+      "required": ["code", "mode", "label", "status", "createdAt"]
+    },
+    "LeaderboardRecord": {
+      "title": "LeaderboardRecord",
+      "description": "Catatan skor peserta pada papan peringkat global tanpa PII plaintext.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "ID unik catatan leaderboard."
+        },
+        "timestamp": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Timestamp ISO-8601."
+        },
+        "formattedDate": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Tanggal terformat lokal WIB."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Nama peserta."
+        },
+        "institution": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Asal instansi atau sekolah peserta."
+        },
+        "phoneCipher": {
+          "type": "string",
+          "maxLength": 300,
+          "description": "Nomor WhatsApp terenkripsi untuk ekspor admin."
+        },
+        "topicId": {
+          "type": "integer",
+          "description": "ID topik kuis."
+        },
+        "topicName": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Judul topik kuis."
+        },
+        "score": {
+          "type": "integer",
+          "description": "Skor akhir peserta."
+        },
+        "totalQuestions": {
+          "type": "integer",
+          "description": "Jumlah soal dalam sesi."
+        },
+        "correctCount": {
+          "type": "integer",
+          "description": "Jumlah jawaban benar."
+        },
+        "timedOutCount": {
+          "type": "integer",
+          "description": "Jumlah soal yang habis waktu."
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "formattedDate",
+        "name",
+        "institution",
+        "topicId",
+        "topicName",
+        "score",
+        "totalQuestions",
+        "correctCount",
+        "timedOutCount"
+      ]
+    }
+  },
+  "firestore": {
+    "/spreadsheet_configs/{configId}": {
+      "schema": { "$ref": "#/entities/SpreadsheetConfig" },
+      "description": "Konfigurasi bank soal spreadsheet (dokumen default)."
+    },
+    "/participant_sheet_configs/{configId}": {
+      "schema": { "$ref": "#/entities/ParticipantSheetConfig" },
+      "description": "Konfigurasi sheet peserta (dokumen default)."
+    },
+    "/tokens/{tokenCode}": {
+      "schema": { "$ref": "#/entities/SessionToken" },
+      "description": "Koleksi token sesi kuis."
+    },
+    "/leaderboard_records/{recordId}": {
+      "schema": { "$ref": "#/entities/LeaderboardRecord" },
+      "description": "Koleksi catatan leaderboard global."
+    }
+  }
+}

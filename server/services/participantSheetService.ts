@@ -1,4 +1,5 @@
 import { GOOGLE_SCRIPT_URL } from '../../src/types/quiz.ts';
+import { fsGetDoc, fsSetDoc, isFirestoreConfigured } from '../lib/firestoreStore.ts';
 import {
   PARTICIPANT_SHEET_CONFIG_FILE,
   readJsonFile,
@@ -10,6 +11,13 @@ import {
   normalizeAppsScriptUrl,
 } from '../lib/sheetParsers.ts';
 import type { ParticipantLogPayload, ParticipantSheetConfig } from '../types.ts';
+
+const PARTICIPANT_COLLECTION = 'participant_sheet_configs';
+const PARTICIPANT_DOC_ID = 'default';
+
+interface FirestoreParticipantConfig extends ParticipantSheetConfig {
+  updatedAt?: string;
+}
 
 const initialParticipantScriptUrl = normalizeAppsScriptUrl(
   process.env.GOOGLE_PARTICIPANT_SCRIPT_URL || GOOGLE_SCRIPT_URL || ''
@@ -34,13 +42,74 @@ participantSheetConfig = {
   ),
 };
 
-export function getParticipantSheetConfig(): ParticipantSheetConfig {
+let loadPromise: Promise<void> | null = null;
+let loadedFromFirestore = false;
+
+function toFirestoreParticipantDoc(cfg: ParticipantSheetConfig): Record<string, unknown> {
+  return {
+    spreadsheetUrl: String(cfg.spreadsheetUrl || '').slice(0, 500),
+    appsScriptUrl: String(cfg.appsScriptUrl || '').slice(0, 500),
+    deploymentId: String(cfg.deploymentId || '').slice(0, 200),
+    sheetName: String(cfg.sheetName || 'Sheet1').slice(0, 100),
+    enabled: Boolean(cfg.enabled),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function ensureParticipantConfigLoaded(): Promise<void> {
+  if (loadedFromFirestore || !isFirestoreConfigured()) return;
+  if (!loadPromise) {
+    loadPromise = (async () => {
+      try {
+        const remote = await fsGetDoc<FirestoreParticipantConfig>(
+          PARTICIPANT_COLLECTION,
+          PARTICIPANT_DOC_ID
+        );
+        if (remote) {
+          const resolvedUrl = normalizeAppsScriptUrl(
+            remote.appsScriptUrl || remote.deploymentId || ''
+          );
+          participantSheetConfig = {
+            spreadsheetUrl: String(remote.spreadsheetUrl || '').trim(),
+            appsScriptUrl: resolvedUrl,
+            deploymentId:
+              String(remote.deploymentId || '').trim() ||
+              extractAppsScriptDeploymentId(resolvedUrl),
+            sheetName: String(remote.sheetName || 'Sheet1').trim() || 'Sheet1',
+            enabled: typeof remote.enabled === 'boolean' ? remote.enabled : true,
+          };
+          writeJsonFile(PARTICIPANT_SHEET_CONFIG_FILE, participantSheetConfig);
+        } else if (
+          participantSheetConfig.spreadsheetUrl ||
+          participantSheetConfig.appsScriptUrl ||
+          participantSheetConfig.deploymentId
+        ) {
+          await fsSetDoc(
+            PARTICIPANT_COLLECTION,
+            PARTICIPANT_DOC_ID,
+            toFirestoreParticipantDoc(participantSheetConfig)
+          );
+        }
+        loadedFromFirestore = true;
+      } catch (err) {
+        console.error('Gagal memuat konfigurasi sheet peserta dari Firestore:', err);
+      } finally {
+        loadPromise = null;
+      }
+    })();
+  }
+  await loadPromise;
+}
+
+export async function getParticipantSheetConfig(): Promise<ParticipantSheetConfig> {
+  await ensureParticipantConfigLoaded();
   return participantSheetConfig;
 }
 
-export function updateParticipantSheetConfigState(
+export async function updateParticipantSheetConfigState(
   input: Partial<ParticipantSheetConfig>
-): ParticipantSheetConfig {
+): Promise<ParticipantSheetConfig> {
+  await ensureParticipantConfigLoaded();
   const rawUrl = String(input.appsScriptUrl ?? participantSheetConfig.appsScriptUrl ?? '').trim();
   const rawDepId = String(input.deploymentId ?? '').trim();
 
@@ -60,6 +129,19 @@ export function updateParticipantSheetConfigState(
       typeof input.enabled === 'boolean' ? input.enabled : participantSheetConfig.enabled,
   };
   writeJsonFile(PARTICIPANT_SHEET_CONFIG_FILE, participantSheetConfig);
+
+  if (isFirestoreConfigured()) {
+    try {
+      await fsSetDoc(
+        PARTICIPANT_COLLECTION,
+        PARTICIPANT_DOC_ID,
+        toFirestoreParticipantDoc(participantSheetConfig)
+      );
+    } catch (err) {
+      console.error('Gagal menyimpan konfigurasi sheet peserta ke Firestore:', err);
+    }
+  }
+
   return participantSheetConfig;
 }
 
@@ -78,6 +160,7 @@ export interface ParticipantLogResult {
 export async function sendParticipantLogToSheet(
   payload: ParticipantLogPayload
 ): Promise<ParticipantLogResult> {
+  await ensureParticipantConfigLoaded();
   if (!participantSheetConfig.enabled) {
     return { ok: true, skipped: true };
   }

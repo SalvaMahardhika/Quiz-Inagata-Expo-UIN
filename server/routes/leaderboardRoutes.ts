@@ -3,12 +3,13 @@ import { addLeaderboardRecord, getPublicLeaderboard } from '../services/leaderbo
 
 export const leaderboardRoutes = Router();
 
-leaderboardRoutes.get('/', (req, res) => {
+leaderboardRoutes.get('/', async (req, res) => {
   const limitParam = Number(req.query.limit) || 20;
-  res.json(getPublicLeaderboard(limitParam));
+  const data = await getPublicLeaderboard(limitParam);
+  res.json(data);
 });
 
-leaderboardRoutes.post('/', (req, res) => {
+leaderboardRoutes.post('/', async (req, res) => {
   const {
     name,
     institution,
@@ -26,7 +27,7 @@ leaderboardRoutes.post('/', (req, res) => {
     return;
   }
 
-  const record = addLeaderboardRecord({
+  const record = await addLeaderboardRecord({
     name,
     institution,
     phone,

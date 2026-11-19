@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
-  consumeSessionToken,
+  consumeSessionTokenAsync,
+  ensureTokensLoaded,
   releaseSessionTokenReservation,
   reserveSessionToken,
   validateTokenAvailability,
@@ -8,7 +9,8 @@ import {
 
 export const tokenRoutes = Router();
 
-tokenRoutes.post('/check', (req, res) => {
+tokenRoutes.post('/check', async (req, res) => {
+  await ensureTokensLoaded();
   const { token, mode, holderKey } = req.body || {};
   const requestedMode: 'SOLO' | 'MULTIPLAYER' = mode === 'MULTIPLAYER' ? 'MULTIPLAYER' : 'SOLO';
   const result = validateTokenAvailability(
@@ -30,7 +32,8 @@ tokenRoutes.post('/check', (req, res) => {
   });
 });
 
-tokenRoutes.post('/reserve', (req, res) => {
+tokenRoutes.post('/reserve', async (req, res) => {
+  await ensureTokensLoaded();
   const { token, mode, holderKey } = req.body || {};
   const requestedMode: 'SOLO' | 'MULTIPLAYER' = mode === 'MULTIPLAYER' ? 'MULTIPLAYER' : 'SOLO';
   const result = reserveSessionToken(
@@ -45,16 +48,17 @@ tokenRoutes.post('/reserve', (req, res) => {
   res.json({ ok: true, token: result.token });
 });
 
-tokenRoutes.post('/release', (req, res) => {
+tokenRoutes.post('/release', async (req, res) => {
+  await ensureTokensLoaded();
   const { token, holderKey } = req.body || {};
   releaseSessionTokenReservation(token, holderKey ? String(holderKey) : undefined);
   res.json({ ok: true });
 });
 
-tokenRoutes.post('/consume', (req, res) => {
+tokenRoutes.post('/consume', async (req, res) => {
   const { token, mode, name, institution, holderKey } = req.body || {};
   const requestedMode: 'SOLO' | 'MULTIPLAYER' = mode === 'MULTIPLAYER' ? 'MULTIPLAYER' : 'SOLO';
-  const result = consumeSessionToken(
+  const result = await consumeSessionTokenAsync(
     token,
     requestedMode,
     String(name || 'Peserta'),

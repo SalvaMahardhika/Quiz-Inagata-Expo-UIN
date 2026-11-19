@@ -4,6 +4,7 @@ import { fisherYates, generateUniqueRoomCode } from '../lib/random.ts';
 import { getLiveTopics } from './spreadsheetService.ts';
 import {
   consumeSessionToken,
+  ensureTokensLoaded,
   normalizeTokenCode,
   releaseSessionTokenReservation,
   reserveSessionToken,
@@ -153,6 +154,7 @@ export async function createRoomSession(params: {
     };
   }
 
+  await ensureTokensLoaded();
   const roomCode = generateUniqueRoomCode(rooms);
   const holderKey = `ROOM:${roomCode}`;
   const tokenCheck = reserveSessionToken(params.sessionToken, 'MULTIPLAYER', holderKey);

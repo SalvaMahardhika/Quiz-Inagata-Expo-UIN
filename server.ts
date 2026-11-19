@@ -10,6 +10,10 @@ import { adminRoutes } from './server/routes/adminRoutes.ts';
 import { imageProxyRoutes } from './server/routes/imageProxyRoutes.ts';
 import { participantRoutes } from './server/routes/participantRoutes.ts';
 import { attachMultiplayerGateway } from './server/ws/multiplayerGateway.ts';
+import { ensureLeaderboardLoaded } from './server/services/leaderboardService.ts';
+import { ensureTokensLoaded } from './server/services/tokenService.ts';
+import { ensureSpreadsheetConfigLoaded } from './server/services/spreadsheetService.ts';
+import { ensureParticipantConfigLoaded } from './server/services/participantSheetService.ts';
 
 export type {
   RoomPlayer,
@@ -58,6 +62,12 @@ async function setupApp() {
   const PORT = Number(process.env.PORT) || 3000;
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    void Promise.all([
+      ensureSpreadsheetConfigLoaded(),
+      ensureParticipantConfigLoaded(),
+      ensureTokensLoaded(),
+      ensureLeaderboardLoaded(),
+    ]).catch((err) => console.error('Firestore startup warmup warning:', err));
   });
 }
 

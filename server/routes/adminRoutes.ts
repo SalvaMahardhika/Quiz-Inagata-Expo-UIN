@@ -12,6 +12,7 @@ import {
 import {
   clearTokensByScope,
   deleteTokenByCode,
+  ensureTokensLoaded,
   generateTokens,
   listTokens,
 } from '../services/tokenService.ts';
@@ -32,21 +33,22 @@ adminRoutes.post('/verify', (req, res) => {
   res.json({ ok: true });
 });
 
-adminRoutes.get('/records', requireAdminPin, (_req, res) => {
-  res.json(getAllAdminRecords());
+adminRoutes.get('/records', requireAdminPin, async (_req, res) => {
+  res.json(await getAllAdminRecords());
 });
 
-adminRoutes.delete('/records', requireAdminPin, (_req, res) => {
-  clearAllLeaderboardRecords();
+adminRoutes.delete('/records', requireAdminPin, async (_req, res) => {
+  await clearAllLeaderboardRecords();
   res.json({ ok: true, totalCount: 0 });
 });
 
-adminRoutes.get('/tokens', requireAdminPin, (_req, res) => {
+adminRoutes.get('/tokens', requireAdminPin, async (_req, res) => {
+  await ensureTokensLoaded();
   res.json({ tokens: listTokens() });
 });
 
-adminRoutes.post('/tokens/generate', requireAdminPin, (req, res) => {
-  const result = generateTokens({
+adminRoutes.post('/tokens/generate', requireAdminPin, async (req, res) => {
+  const result = await generateTokens({
     count: req.body?.count,
     mode: req.body?.mode,
     label: req.body?.label,
@@ -54,21 +56,22 @@ adminRoutes.post('/tokens/generate', requireAdminPin, (req, res) => {
   res.status(201).json({ ok: true, ...result });
 });
 
-adminRoutes.delete('/tokens/:code', requireAdminPin, (req, res) => {
-  const tokens = deleteTokenByCode(String(req.params.code || ''));
+adminRoutes.delete('/tokens/:code', requireAdminPin, async (req, res) => {
+  const tokens = await deleteTokenByCode(String(req.params.code || ''));
   res.json({ ok: true, tokens });
 });
 
-adminRoutes.delete('/tokens', requireAdminPin, (req, res) => {
+adminRoutes.delete('/tokens', requireAdminPin, async (req, res) => {
   const scope = String(req.query.scope || 'used');
-  const tokens = clearTokensByScope(scope);
+  const tokens = await clearTokensByScope(scope);
   res.json({ ok: true, tokens });
 });
 
 adminRoutes.get('/spreadsheet', requireAdminPin, async (_req, res) => {
+  const config = await getSpreadsheetConfig();
   const live = await getLiveTopics(false);
   res.json({
-    config: getSpreadsheetConfig(),
+    config,
     adminTopics: live.adminTopics,
     liveTopics: {
       topics: live.topics,
@@ -82,7 +85,7 @@ adminRoutes.get('/spreadsheet', requireAdminPin, async (_req, res) => {
 });
 
 adminRoutes.put('/spreadsheet', requireAdminPin, async (req, res) => {
-  const { config, connectionChanged } = updateSpreadsheetConfigState(req.body || {});
+  const { config, connectionChanged } = await updateSpreadsheetConfigState(req.body || {});
   const live = await getLiveTopics(connectionChanged);
   res.json({
     ok: true,
@@ -106,12 +109,12 @@ adminRoutes.put('/spreadsheet', requireAdminPin, async (req, res) => {
   });
 });
 
-adminRoutes.get('/participant-sheet', requireAdminPin, (_req, res) => {
-  res.json({ config: getParticipantSheetConfig() });
+adminRoutes.get('/participant-sheet', requireAdminPin, async (_req, res) => {
+  res.json({ config: await getParticipantSheetConfig() });
 });
 
-adminRoutes.put('/participant-sheet', requireAdminPin, (req, res) => {
-  const config = updateParticipantSheetConfigState(req.body || {});
+adminRoutes.put('/participant-sheet', requireAdminPin, async (req, res) => {
+  const config = await updateParticipantSheetConfigState(req.body || {});
   res.json({ ok: true, config });
 });
 

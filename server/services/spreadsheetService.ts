@@ -1,4 +1,5 @@
 import { RawQuestion, TopicPackage } from '../../src/types/quiz.ts';
+import { fsGetDoc, fsSetDoc, isFirestoreConfigured } from '../lib/firestoreStore.ts';
 import { readJsonFile, writeJsonFile, SPREADSHEET_CONFIG_FILE } from '../lib/jsonStore.ts';
 import {
   IGNORED_SHEET_TABS,
@@ -406,14 +407,94 @@ async function fetchFromAppsScript(
   }
 }
 
-export function getSpreadsheetConfig(): SpreadsheetConfig {
+const SPREADSHEET_COLLECTION = 'spreadsheet_configs';
+const SPREADSHEET_DOC_ID = 'default';
+let spreadsheetLoadPromise: Promise<void> | null = null;
+let spreadsheetLoadedFromFirestore = false;
+
+interface FirestoreSpreadsheetDoc extends SpreadsheetConfig {
+  updatedAt?: string;
+}
+
+function toFirestoreSpreadsheetDoc(cfg: SpreadsheetConfig): Record<string, unknown> {
+  return {
+    spreadsheetUrlOrId: String(cfg.spreadsheetUrlOrId || '').slice(0, 500),
+    appsScriptUrl: String(cfg.appsScriptUrl || '').slice(0, 500),
+    deploymentId: String(cfg.deploymentId || '').slice(0, 200),
+    sheetNames: Array.isArray(cfg.sheetNames)
+      ? cfg.sheetNames.slice(0, 50).map((s) => String(s).slice(0, 120))
+      : [],
+    disabledSheets: Array.isArray(cfg.disabledSheets)
+      ? cfg.disabledSheets.slice(0, 50).map((s) => String(s).slice(0, 120))
+      : [],
+    enabled: Boolean(cfg.enabled),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function ensureSpreadsheetConfigLoaded(): Promise<void> {
+  if (spreadsheetLoadedFromFirestore || !isFirestoreConfigured()) return;
+  if (!spreadsheetLoadPromise) {
+    spreadsheetLoadPromise = (async () => {
+      try {
+        const remote = await fsGetDoc<FirestoreSpreadsheetDoc>(
+          SPREADSHEET_COLLECTION,
+          SPREADSHEET_DOC_ID
+        );
+        if (remote) {
+          const resolvedUrl = normalizeAppsScriptUrl(
+            remote.appsScriptUrl || remote.deploymentId || ''
+          );
+          spreadsheetConfig = {
+            spreadsheetUrlOrId: String(remote.spreadsheetUrlOrId || '').trim(),
+            appsScriptUrl: resolvedUrl,
+            deploymentId:
+              String(remote.deploymentId || '').trim() ||
+              extractAppsScriptDeploymentId(resolvedUrl),
+            sheetNames: Array.isArray(remote.sheetNames) ? remote.sheetNames : [],
+            disabledSheets: Array.isArray(remote.disabledSheets)
+              ? Array.from(
+                  new Set(remote.disabledSheets.map(normalizeSheetKey).filter(Boolean))
+                )
+              : [],
+            enabled: typeof remote.enabled === 'boolean' ? remote.enabled : true,
+          };
+          writeJsonFile(SPREADSHEET_CONFIG_FILE, spreadsheetConfig);
+          rawFetchCache = null;
+          liveCache = null;
+        } else if (
+          spreadsheetConfig.spreadsheetUrlOrId ||
+          spreadsheetConfig.appsScriptUrl ||
+          spreadsheetConfig.deploymentId ||
+          (spreadsheetConfig.disabledSheets && spreadsheetConfig.disabledSheets.length > 0)
+        ) {
+          await fsSetDoc(
+            SPREADSHEET_COLLECTION,
+            SPREADSHEET_DOC_ID,
+            toFirestoreSpreadsheetDoc(spreadsheetConfig)
+          );
+        }
+        spreadsheetLoadedFromFirestore = true;
+      } catch (err) {
+        console.error('Gagal memuat konfigurasi spreadsheet dari Firestore:', err);
+      } finally {
+        spreadsheetLoadPromise = null;
+      }
+    })();
+  }
+  await spreadsheetLoadPromise;
+}
+
+export async function getSpreadsheetConfig(): Promise<SpreadsheetConfig> {
+  await ensureSpreadsheetConfigLoaded();
   return spreadsheetConfig;
 }
 
-export function updateSpreadsheetConfigState(input: Partial<SpreadsheetConfig>): {
+export async function updateSpreadsheetConfigState(input: Partial<SpreadsheetConfig>): Promise<{
   config: SpreadsheetConfig;
   connectionChanged: boolean;
-} {
+}> {
+  await ensureSpreadsheetConfigLoaded();
   const prev = spreadsheetConfig;
   const rawUrl = String(input.appsScriptUrl ?? spreadsheetConfig.appsScriptUrl ?? '').trim();
   const rawDepId = String(input.deploymentId ?? '').trim();
@@ -439,6 +520,18 @@ export function updateSpreadsheetConfigState(input: Partial<SpreadsheetConfig>):
   };
   writeJsonFile(SPREADSHEET_CONFIG_FILE, spreadsheetConfig);
 
+  if (isFirestoreConfigured()) {
+    try {
+      await fsSetDoc(
+        SPREADSHEET_COLLECTION,
+        SPREADSHEET_DOC_ID,
+        toFirestoreSpreadsheetDoc(spreadsheetConfig)
+      );
+    } catch (err) {
+      console.error('Gagal menyimpan konfigurasi spreadsheet ke Firestore:', err);
+    }
+  }
+
   const connectionChanged =
     prev.spreadsheetUrlOrId !== spreadsheetConfig.spreadsheetUrlOrId ||
     prev.appsScriptUrl !== spreadsheetConfig.appsScriptUrl ||
@@ -453,6 +546,7 @@ export function updateSpreadsheetConfigState(input: Partial<SpreadsheetConfig>):
 }
 
 export async function getLiveTopics(forceRefresh = false): Promise<LiveQuestionsCache> {
+  await ensureSpreadsheetConfigLoaded();
   const now = Date.now();
   if (!forceRefresh && liveCache && now - liveCache.fetchedAtMs < CACHE_TTL_MS) {
     return liveCache;

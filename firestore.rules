@@ -1,0 +1,188 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidSpreadsheetConfig(data) {
+      return data.keys().hasAll([
+          'spreadsheetUrlOrId',
+          'appsScriptUrl',
+          'deploymentId',
+          'sheetNames',
+          'disabledSheets',
+          'enabled',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'spreadsheetUrlOrId',
+          'appsScriptUrl',
+          'deploymentId',
+          'sheetNames',
+          'disabledSheets',
+          'enabled',
+          'updatedAt'
+        ]) &&
+        data.spreadsheetUrlOrId is string && data.spreadsheetUrlOrId.size() <= 500 &&
+        data.appsScriptUrl is string && data.appsScriptUrl.size() <= 500 &&
+        data.deploymentId is string && data.deploymentId.size() <= 200 &&
+        data.sheetNames is list && data.sheetNames.size() <= 50 &&
+        (data.sheetNames.size() == 0 || (data.sheetNames[0] is string && data.sheetNames[0].size() <= 120)) &&
+        data.disabledSheets is list && data.disabledSheets.size() <= 50 &&
+        (data.disabledSheets.size() == 0 || (data.disabledSheets[0] is string && data.disabledSheets[0].size() <= 120)) &&
+        data.enabled is bool &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidParticipantSheetConfig(data) {
+      return data.keys().hasAll([
+          'spreadsheetUrl',
+          'appsScriptUrl',
+          'deploymentId',
+          'sheetName',
+          'enabled',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'spreadsheetUrl',
+          'appsScriptUrl',
+          'deploymentId',
+          'sheetName',
+          'enabled',
+          'updatedAt'
+        ]) &&
+        data.spreadsheetUrl is string && data.spreadsheetUrl.size() <= 500 &&
+        data.appsScriptUrl is string && data.appsScriptUrl.size() <= 500 &&
+        data.deploymentId is string && data.deploymentId.size() <= 200 &&
+        data.sheetName is string && data.sheetName.size() <= 100 &&
+        data.enabled is bool &&
+        data.updatedAt is string && data.updatedAt.size() <= 64;
+    }
+
+    function isValidSessionToken(data, tokenCode) {
+      return data.keys().hasAll(['code', 'mode', 'label', 'status', 'createdAt']) &&
+        data.keys().hasOnly([
+          'code',
+          'mode',
+          'label',
+          'status',
+          'createdAt',
+          'usedAt',
+          'usedBy',
+          'usedInstitution',
+          'usedMode',
+          'roomCode'
+        ]) &&
+        data.code is string && data.code == tokenCode && data.code.size() >= 4 && data.code.size() <= 16 && data.code.matches('^[A-Z0-9]+$') &&
+        data.mode in ['ALL', 'SOLO', 'MULTIPLAYER'] &&
+        data.label is string && data.label.size() <= 120 &&
+        data.status in ['UNUSED', 'USED'] &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('usedAt' in data) || (data.usedAt is string && data.usedAt.size() <= 64)) &&
+        (!('usedBy' in data) || (data.usedBy is string && data.usedBy.size() <= 120)) &&
+        (!('usedInstitution' in data) || (data.usedInstitution is string && data.usedInstitution.size() <= 160)) &&
+        (!('usedMode' in data) || data.usedMode in ['SOLO', 'MULTIPLAYER']) &&
+        (!('roomCode' in data) || (data.roomCode is string && data.roomCode.size() <= 16));
+    }
+
+    function isValidLeaderboardRecord(data, recordId) {
+      return data.keys().hasAll([
+          'id',
+          'timestamp',
+          'formattedDate',
+          'name',
+          'institution',
+          'topicId',
+          'topicName',
+          'score',
+          'totalQuestions',
+          'correctCount',
+          'timedOutCount'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'timestamp',
+          'formattedDate',
+          'name',
+          'institution',
+          'phoneCipher',
+          'topicId',
+          'topicName',
+          'score',
+          'totalQuestions',
+          'correctCount',
+          'timedOutCount'
+        ]) &&
+        data.id is string && data.id == recordId && data.id.size() <= 80 && data.id.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.timestamp is string && data.timestamp.size() <= 64 &&
+        data.formattedDate is string && data.formattedDate.size() <= 64 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.institution is string && data.institution.size() <= 160 &&
+        (!('phoneCipher' in data) || (data.phoneCipher is string && data.phoneCipher.size() <= 300)) &&
+        data.topicId is int && data.topicId >= 0 && data.topicId <= 1000 &&
+        data.topicName is string && data.topicName.size() <= 160 &&
+        data.score is int && data.score >= 0 && data.score <= 100000 &&
+        data.totalQuestions is int && data.totalQuestions >= 0 && data.totalQuestions <= 200 &&
+        data.correctCount is int && data.correctCount >= 0 && data.correctCount <= 200 &&
+        data.timedOutCount is int && data.timedOutCount >= 0 && data.timedOutCount <= 200;
+    }
+
+    match /test/{docId} {
+      allow get: if docId == 'connection';
+    }
+
+    match /spreadsheet_configs/{configId} {
+      allow get: if isValidId(configId) && configId == 'default';
+      allow create, update: if isValidId(configId) && configId == 'default' && isValidSpreadsheetConfig(incoming());
+    }
+
+    match /participant_sheet_configs/{configId} {
+      allow get: if isValidId(configId) && configId == 'default';
+      allow create, update: if isValidId(configId) && configId == 'default' && isValidParticipantSheetConfig(incoming());
+    }
+
+    match /tokens/{tokenCode} {
+      allow get: if isValidId(tokenCode);
+      allow list: if resource.data.status in ['UNUSED', 'USED'];
+      allow create: if isValidId(tokenCode) &&
+        isValidSessionToken(incoming(), tokenCode) &&
+        incoming().status == 'UNUSED';
+      allow update: if isValidId(tokenCode) &&
+        isValidSessionToken(incoming(), tokenCode) &&
+        existing().status == 'UNUSED' &&
+        incoming().status == 'USED' &&
+        incoming().code == existing().code &&
+        incoming().mode == existing().mode &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'status',
+          'usedAt',
+          'usedBy',
+          'usedInstitution',
+          'usedMode',
+          'roomCode'
+        ]);
+      allow delete: if isValidId(tokenCode);
+    }
+
+    match /leaderboard_records/{recordId} {
+      allow get: if isValidId(recordId);
+      allow list: if resource.data.topicId >= 0 && resource.data.topicId <= 1000;
+      allow create: if isValidId(recordId) && isValidLeaderboardRecord(incoming(), recordId);
+      allow delete: if isValidId(recordId);
+    }
+  }
+}
